@@ -1,0 +1,19 @@
+[theme]
+# Warna Aksen Utama (Tombol, Teks Highlight)
+# Kita gunakan warna Sky Blue yang modern dan elegan
+primaryColor = "#0EA5E9"
+
+# Warna Latar Belakang Utama
+# Slate 900 (Biru Dongker Sangat Gelap) - Nyaman di mata, lebih elegan dari hitam pekat
+backgroundColor = "#0F172A"
+
+# Warna Latar Belakang Kedua (Sidebar, Kotak Input, Expander)
+# Slate 800 - Sedikit lebih terang dari background utama untuk kontras ruang
+secondaryBackgroundColor = "#1E293B"
+
+# Warna Teks Utama
+# Slate 50 (Putih keabu-abuan) - Sangat tajam dan mudah dibaca oleh lansia
+textColor = "#F8FAFC"
+
+# Jenis Font
+font = "sans serif"

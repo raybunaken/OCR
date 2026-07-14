@@ -1,0 +1,5 @@
+paddlepaddle
+paddleocr
+gradio
+pymupdf
+groq
