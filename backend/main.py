@@ -179,7 +179,7 @@ def extract_from_image_vision(base64_image):
                     ]
                 }
             ],
-            model="llama-3.2-11b-vision-preview",
+            model="llama-3.2-11b-vision-instruct",
             temperature=0.2
         )
         content = chat.choices[0].message.content
