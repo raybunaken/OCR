@@ -1,67 +1,71 @@
+import os
+import io
+import json
+import base64
+import fitz
+import datetime
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import sqlite3
-import json
-import fitz
-import numpy as np
-from PIL import Image
+import psycopg2
+import psycopg2.extras
 from groq import Groq
-from paddleocr import PaddleOCR
-import datetime
-import os
-import io
-
-import asyncio
-import shutil
-import time
+from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
-# Pastikan path absolut agar tidak error saat dihosting via gunicorn/systemd
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv()
 
-# Setup Auto Backup Loop
-BACKUP_DIR = os.path.join(BASE_DIR, "backups")
-os.makedirs(BACKUP_DIR, exist_ok=True)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
-async def auto_backup_loop():
-    while True:
-        try:
-            # Karena ini initial test, saya setel sleep-nya di akhir agar backup pertama langsung berjalan saat server menyala
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            backup_filename = f"backup_arsip_{timestamp}.db"
-            
-            # DB_PATH akan di-define di bawah, tapi kita bisa pakai variabel global
-            target_db = os.getenv("DB_PATH", os.path.abspath(os.path.join(BASE_DIR, "..", "arsip_asuransi.db")))
-            backup_path = os.path.join(BACKUP_DIR, backup_filename)
-            
-            if os.path.exists(target_db):
-                shutil.copy2(target_db, backup_path)
-                print(f"✅ AUTO-BACKUP BERHASIL: {backup_filename}")
-                
-            # Cleanup old backups (> 7 hari)
-            now = time.time()
-            for filename in os.listdir(BACKUP_DIR):
-                filepath = os.path.join(BACKUP_DIR, filename)
-                if os.path.isfile(filepath):
-                    if os.stat(filepath).st_mtime < now - 7 * 86400:
-                        os.remove(filepath)
-                        print(f"🗑️ BACKUP LAMA DIHAPUS: {filename}")
-                        
-        except Exception as e:
-            print(f"❌ ERROR AUTO-BACKUP: {e}")
-            
-        await asyncio.sleep(86400) # Tunggu 24 Jam
+# Ambil URL Database PostgreSQL (Neon) dari environment variable
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+def init_db():
+    if not DATABASE_URL:
+        print("WARNING: DATABASE_URL belum diatur!")
+        return
+    conn = psycopg2.connect(DATABASE_URL)
+    cursor = conn.cursor()
+    
+    # Buat tabel dokumen jika belum ada
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dokumen (
+            id SERIAL PRIMARY KEY,
+            nama_klien TEXT,
+            jenis_dokumen TEXT,
+            nomor_identitas TEXT,
+            nilai_proyek TEXT,
+            obligee TEXT,
+            pekerjaan TEXT,
+            masa_berlaku TEXT,
+            teks_dokumen TEXT,
+            created_at TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+    """)
+    
+    # Buat tabel audit_logs jika belum ada
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id SERIAL PRIMARY KEY,
+            doc_id INTEGER,
+            catatan TEXT,
+            created_at TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    task = asyncio.create_task(auto_backup_loop())
+    # Startup: Inisialisasi Database Tables
+    init_db()
     yield
     # Shutdown
-    task.cancel()
 
 app = FastAPI(title="Insurance CRM API", lifespan=lifespan)
+
 # Setup CORS
 app.add_middleware(
     CORSMiddleware,
@@ -70,19 +74,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-from dotenv import load_dotenv
-import cv2
-
-load_dotenv()
-
-# Initialize OCR and AI
-ocr = PaddleOCR(use_angle_cls=True, lang='id', enable_mkldnn=False)
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-
-DB_PATH = os.getenv("DB_PATH", os.path.abspath(os.path.join(BASE_DIR, "..", "arsip_asuransi.db")))
 
 class DocumentUpdate(BaseModel):
     nama_klien: str
@@ -95,9 +86,13 @@ class DocumentUpdate(BaseModel):
     teks_dokumen: str
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15.0)
-    conn.row_factory = sqlite3.Row
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="Database URL belum dikonfigurasi")
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
+
+def encode_image_bytes(image_bytes):
+    return base64.b64encode(image_bytes).decode('utf-8')
 
 def rapikan_teks(teks_mentah):
     fallback_data = {
@@ -113,7 +108,7 @@ def rapikan_teks(teks_mentah):
         
     try:
         prompt = (
-            "Anda adalah asisten admin asuransi. Tugas Anda adalah mengekstrak teks hasil OCR menjadi format JSON.\n"
+            "Anda adalah asisten admin asuransi. Tugas Anda adalah mengekstrak teks menjadi format JSON.\n"
             "Ekstrak informasi penting dari dokumen Surety Bond dan berikan respons HANYA berupa JSON murni dengan struktur berikut:\n"
             "{\n"
             '  "jenis_jaminan": "... (contoh: Jaminan Pelaksanaan, Jaminan Uang Muka, dll)",\n'
@@ -130,7 +125,7 @@ def rapikan_teks(teks_mentah):
         )
         chat = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             temperature=0.2
         )
         content = chat.choices[0].message.content
@@ -143,53 +138,93 @@ def rapikan_teks(teks_mentah):
         print("ERROR AI EXTRACTION:", e)
         return fallback_data
 
+def extract_from_image_vision(base64_image):
+    """Mengekstrak data JSON langsung dari gambar menggunakan Groq Vision"""
+    fallback_data = {
+        "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
+        "principal": "-", "obligee": "-", "pekerjaan": "-", 
+        "masa_berlaku": "-", "teks_asli": "Pengekstrakan dari gambar."
+    }
+    if not groq_client:
+        return fallback_data
+        
+    try:
+        prompt = (
+            "Anda adalah sistem OCR asuransi. Ekstrak informasi dari gambar Surety Bond ini "
+            "dan berikan respons HANYA berupa JSON murni dengan struktur berikut:\n"
+            "{\n"
+            '  "jenis_jaminan": "... (Jaminan Pelaksanaan, Uang Muka, dll)",\n'
+            '  "nomor_jaminan": "...",\n'
+            '  "nilai_jaminan": "...",\n'
+            '  "principal": "... (Nama Terjamin)",\n'
+            '  "obligee": "... (Penerima Jaminan)",\n'
+            '  "pekerjaan": "... (Nama Proyek)",\n'
+            '  "masa_berlaku": "...",\n'
+            '  "teks_asli": "... (Transkrip seluruh isi teks dokumen dari atas sampai bawah)"\n'
+            "}\n"
+            "Jika data tidak ditemukan, isi '-'. Jangan tambahkan teks lain selain JSON."
+        )
+        chat = groq_client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            model="llama-3.2-11b-vision-preview",
+            temperature=0.2
+        )
+        content = chat.choices[0].message.content
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0]
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0]
+        return json.loads(content.strip())
+    except Exception as e:
+        print("ERROR GROQ VISION:", e)
+        return fallback_data
+
+
 @app.post("/api/extract")
 async def extract_document(file: UploadFile = File(...)):
     contents = await file.read()
-    full_text = ""
     
     try:
         if file.filename.lower().endswith('.pdf'):
             doc = fitz.open("pdf", contents)
+            teks_digital = ""
             for page in doc:
-                pix = page.get_pixmap(alpha=False, colorspace=fitz.csRGB)
-                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+                teks_digital += page.get_text().strip() + "\n"
                 
-                teks_digital = page.get_text().strip()
-                if len(teks_digital) > 20:
-                    full_text += teks_digital + "\n"
-                else:
-                    result = ocr.ocr(img)
-                    if result:
-                        for res in result:
-                            if not res: continue
-                            for line in res:
-                                if isinstance(line, (list, tuple)) and len(line) >= 2:
-                                    full_text += line[1][0] + " "
-                    full_text += "\n"
+            if len(teks_digital.strip()) > 50:
+                # Digital PDF (bisa di-select teksnya)
+                data_ekstrak = rapikan_teks(teks_digital)
+                return {"status": "success", "data": data_ekstrak}
+            else:
+                # PDF Scan (hanya berisi gambar) -> Render halaman 1 ke gambar
+                page = doc[0]
+                pix = page.get_pixmap(dpi=150)
+                img_bytes = pix.tobytes("jpeg")
+                b64_image = encode_image_bytes(img_bytes)
+                data_ekstrak = extract_from_image_vision(b64_image)
+                return {"status": "success", "data": data_ekstrak}
+                
         elif file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-            img_array = np.frombuffer(contents, np.uint8)
-            img_cv2 = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-            result = ocr.ocr(img_cv2)
-            if result:
-                for res in result:
-                    if not res: continue
-                    if isinstance(res, dict) and 'rec_texts' in res:
-                        # Versi PaddleOCR (PaddleX backend) terbaru
-                        for text in res['rec_texts']:
-                            if text: full_text += str(text) + "\n"
-                    elif isinstance(res, list):
-                        # Versi standar/lama PaddleOCR
-                        for line in res:
-                            if isinstance(line, (list, tuple)) and len(line) >= 2:
-                                full_text += str(line[1][0]) + "\n"
-            full_text += "\n"
+            # Langsung kirim ke Groq Vision
+            b64_image = encode_image_bytes(contents)
+            data_ekstrak = extract_from_image_vision(b64_image)
+            return {"status": "success", "data": data_ekstrak}
         else:
             raise HTTPException(status_code=400, detail="Format tidak didukung. Harap upload PDF, JPG, atau PNG.")
             
-        data_ekstrak = rapikan_teks(full_text)
-        return {"status": "success", "data": data_ekstrak}
-        
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -198,7 +233,9 @@ async def extract_document(file: UploadFile = File(...)):
 @app.get("/api/documents")
 def get_documents():
     conn = get_db_connection()
-    docs = conn.execute("SELECT * FROM dokumen ORDER BY id DESC").fetchall()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM dokumen ORDER BY id DESC")
+    docs = cursor.fetchall()
     conn.close()
     return [dict(ix) for ix in docs]
 
@@ -209,7 +246,7 @@ def save_document(doc: DocumentUpdate):
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO dokumen (nama_klien, jenis_dokumen, nomor_identitas, nilai_proyek, obligee, pekerjaan, masa_berlaku, teks_dokumen, created_at, updated_at) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, waktu_sekarang, waktu_sekarang))
     conn.commit()
     conn.close()
@@ -219,7 +256,7 @@ def save_document(doc: DocumentUpdate):
 def delete_document(doc_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM dokumen WHERE id=?", (doc_id,))
+    cursor.execute("DELETE FROM dokumen WHERE id=%s", (doc_id,))
     conn.commit()
     conn.close()
     return {"status": "success"}
@@ -228,10 +265,11 @@ def delete_document(doc_id: int):
 def update_document(doc_id: int, doc: DocumentUpdate):
     waktu_sekarang = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     # 1. Ambil data lama
-    old_data = cursor.execute("SELECT * FROM dokumen WHERE id=?", (doc_id,)).fetchone()
+    cursor.execute("SELECT * FROM dokumen WHERE id=%s", (doc_id,))
+    old_data = cursor.fetchone()
     if not old_data:
         conn.close()
         raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan")
@@ -262,13 +300,13 @@ def update_document(doc_id: int, doc: DocumentUpdate):
     # 3. Jika ada perubahan, catat ke audit_logs
     if perubahan:
         catatan_lengkap = " | ".join(perubahan)
-        cursor.execute("INSERT INTO audit_logs (doc_id, catatan, created_at) VALUES (?, ?, ?)", (doc_id, catatan_lengkap, waktu_sekarang))
+        cursor.execute("INSERT INTO audit_logs (doc_id, catatan, created_at) VALUES (%s, %s, %s)", (doc_id, catatan_lengkap, waktu_sekarang))
     
     # 4. Update tabel dokumen
     cursor.execute("""
         UPDATE dokumen 
-        SET nama_klien=?, jenis_dokumen=?, nomor_identitas=?, nilai_proyek=?, obligee=?, pekerjaan=?, masa_berlaku=?, teks_dokumen=?, updated_at=?
-        WHERE id=?
+        SET nama_klien=%s, jenis_dokumen=%s, nomor_identitas=%s, nilai_proyek=%s, obligee=%s, pekerjaan=%s, masa_berlaku=%s, teks_dokumen=%s, updated_at=%s
+        WHERE id=%s
     """, (doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, waktu_sekarang, doc_id))
     
     conn.commit()
@@ -278,6 +316,16 @@ def update_document(doc_id: int, doc: DocumentUpdate):
 @app.get("/api/documents/{doc_id}/logs")
 def get_audit_logs(doc_id: int):
     conn = get_db_connection()
-    logs = conn.execute("SELECT * FROM audit_logs WHERE doc_id=? ORDER BY id DESC", (doc_id,)).fetchall()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM audit_logs WHERE doc_id=%s ORDER BY id DESC", (doc_id,))
+    logs = cursor.fetchall()
     conn.close()
-    return [dict(log) for log in logs]
+    
+    # Convert datetime objects to string if psycopg2 returns datetime
+    result = []
+    for log in logs:
+        log_dict = dict(log)
+        if isinstance(log_dict['created_at'], datetime.datetime):
+             log_dict['created_at'] = log_dict['created_at'].strftime("%Y-%m-%d %H:%M:%S")
+        result.append(log_dict)
+    return result
