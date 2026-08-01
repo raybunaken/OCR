@@ -11,21 +11,31 @@ export default function Home() {
   const [extractedData, setExtractedData] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
   const [deleteModalData, setDeleteModalData] = useState<any>(null);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [showAuditModal, setShowAuditModal] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [highlightedWord, setHighlightedWord] = useState("");
+  const [isEditMode, setIsEditMode] = useState(false);
 
   const highlightInSource = (textToFind: string) => {
-    if (!textToFind || textToFind === "-" || !extractedData?.teks_asli || !textareaRef.current) return;
-    
-    const sourceText = extractedData.teks_asli.toLowerCase();
-    const targetText = textToFind.toLowerCase();
-    const startIndex = sourceText.indexOf(targetText);
-    
-    if (startIndex !== -1) {
-      textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(startIndex, startIndex + textToFind.length);
+    if (!textToFind || textToFind === "-") {
+      setHighlightedWord("");
+      return;
     }
+    setHighlightedWord(textToFind);
+  };
+
+  const renderHighlightedText = (text: string, highlight: string) => {
+    if (!highlight || highlight === "-") return text;
+    const safeHighlight = highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${safeHighlight})`, 'gi'));
+    return (
+      <>
+        {parts.map((part, i) => 
+          part.toLowerCase() === highlight.toLowerCase() 
+            ? <mark key={i} className="bg-yellow-400 text-slate-900 px-1 rounded font-bold shadow-lg shadow-yellow-500/20 animate-pulse">{part}</mark> 
+            : part
+        )}
+      </>
+    );
   };
 
   // States untuk Pencarian Ultimate
@@ -487,16 +497,28 @@ export default function Home() {
                     <svg className="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                     Dokumen Asli (OCR)
                   </h2>
+                  <button 
+                    onClick={() => setIsEditMode(!isEditMode)}
+                    className="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-600 px-3 py-1.5 rounded-full transition-colors flex items-center gap-1.5 shadow-md shadow-sky-900/20"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                    {isEditMode ? "Mode Tampilan" : "Edit Teks"}
+                  </button>
                 </div>
                 <div className="p-6">
-                  <textarea 
-                    ref={textareaRef}
-                    rows={35} 
-                    value={extractedData.teks_asli || ""} 
-                    onChange={(e) => setExtractedData({...extractedData, teks_asli: e.target.value})} 
-                    className="w-full bg-[#0f172a]/60 text-slate-100 p-8 rounded-2xl font-sans text-lg leading-loose resize-none focus:outline-none focus:bg-[#0f172a]/80 transition-colors border border-slate-700/50 shadow-inner"
-                    placeholder="Teks dokumen akan muncul di sini..."
-                  />
+                  {isEditMode ? (
+                    <textarea 
+                      rows={35} 
+                      value={extractedData.teks_asli || ""} 
+                      onChange={(e) => setExtractedData({...extractedData, teks_asli: e.target.value})} 
+                      className="w-full bg-[#0f172a]/60 text-slate-100 p-8 rounded-2xl font-sans text-lg leading-loose resize-none focus:outline-none focus:bg-[#0f172a]/80 transition-colors border border-slate-700/50 shadow-inner"
+                      placeholder="Teks dokumen akan muncul di sini..."
+                    />
+                  ) : (
+                    <div className="w-full h-[700px] bg-[#0f172a]/60 text-slate-100 p-8 rounded-2xl font-sans text-lg leading-loose overflow-y-auto whitespace-pre-wrap border border-slate-700/50 shadow-inner">
+                      {renderHighlightedText(extractedData.teks_asli || "", highlightedWord)}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
