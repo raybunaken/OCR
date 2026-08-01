@@ -201,6 +201,7 @@ def extract_from_image_vision(base64_image):
         return json.loads(content.strip())
     except Exception as e:
         print("ERROR GROQ VISION:", e)
+        fallback_data["teks_asli"] = "Pengekstrakan gagal: " + str(e)
         return fallback_data
 
 
