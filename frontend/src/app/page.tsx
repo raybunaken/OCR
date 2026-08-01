@@ -25,18 +25,31 @@ export default function Home() {
   };
 
   const renderHighlightedText = (text: string, highlight: string) => {
-    if (!highlight || highlight === "-") return text;
-    const safeHighlight = highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = text.split(new RegExp(`(${safeHighlight})`, 'gi'));
-    return (
-      <>
-        {parts.map((part, i) => 
-          part.toLowerCase() === highlight.toLowerCase() 
-            ? <mark key={i} className="bg-yellow-400 text-slate-900 px-1 rounded font-bold shadow-lg shadow-yellow-500/20 animate-pulse">{part}</mark> 
-            : part
-        )}
-      </>
-    );
+    if (!highlight || highlight === "-" || highlight.trim().length < 2) return text;
+    
+    // Escape special regex characters but replace spaces with a pattern that matches ANY whitespace/newline
+    const safeHighlight = highlight
+      .trim()
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\s+/g, '[\\s\\n]+');
+      
+    try {
+      const regex = new RegExp(`(${safeHighlight})`, 'gi');
+      const parts = text.split(regex);
+      
+      return (
+        <>
+          {parts.map((part, i) => 
+            // the matched group is always at odd indices when using split with capture groups
+            i % 2 === 1 
+              ? <mark key={i} className="bg-yellow-400 text-slate-900 px-1 rounded font-bold shadow-lg shadow-yellow-500/20 animate-pulse">{part}</mark> 
+              : part
+          )}
+        </>
+      );
+    } catch (e) {
+      return text;
+    }
   };
 
   // States untuk Pencarian Ultimate
@@ -516,7 +529,7 @@ export default function Home() {
                       placeholder="Teks dokumen akan muncul di sini..."
                     />
                   ) : (
-                    <div className="w-full h-[700px] bg-[#0f172a]/60 text-slate-100 p-8 rounded-2xl font-sans text-lg leading-loose overflow-y-auto whitespace-pre-wrap border border-slate-700/50 shadow-inner">
+                    <div className="w-full min-h-[700px] h-full bg-[#0f172a]/60 text-slate-100 p-8 rounded-2xl font-sans text-lg leading-loose whitespace-pre-wrap border border-slate-700/50 shadow-inner">
                       {renderHighlightedText(extractedData.teks_asli || "", highlightedWord)}
                     </div>
                   )}
