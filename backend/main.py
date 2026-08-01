@@ -127,7 +127,7 @@ def rapikan_teks(teks_mentah):
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             temperature=0.2,
-            max_tokens=8000,
+            max_tokens=4000,
             response_format={"type": "json_object"}
         )
         content = chat.choices[0].message.content
@@ -183,7 +183,7 @@ def extract_from_image_vision(base64_image):
             ],
             model="qwen/qwen3.6-27b",
             temperature=0.2,
-            max_tokens=8000,
+            max_tokens=4000,
             response_format={"type": "json_object"}
         )
         content = chat.choices[0].message.content
