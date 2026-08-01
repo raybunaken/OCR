@@ -27,22 +27,53 @@ export default function Home() {
   const renderHighlightedText = (text: string, highlight: string) => {
     if (!highlight || highlight === "-" || highlight.trim().length < 2) return text;
     
-    // Escape special regex characters but replace spaces with a pattern that matches ANY whitespace/newline
-    const safeHighlight = highlight
+    // ATTEMPT 1: EXACT PHRASE MATCH (ignoring spaces/newlines)
+    const exactSafe = highlight
       .trim()
       .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       .replace(/\s+/g, '[\\s\\n]+');
       
     try {
-      const regex = new RegExp(`(${safeHighlight})`, 'gi');
-      const parts = text.split(regex);
+      const exactRegex = new RegExp(`(${exactSafe})`, 'gi');
+      if (exactRegex.test(text)) {
+        const parts = text.split(exactRegex);
+        return (
+          <>
+            {parts.map((part, i) => 
+              i % 2 === 1 
+                ? <mark key={i} className="bg-yellow-400 text-slate-900 px-1 rounded font-bold shadow-lg shadow-yellow-500/20 animate-pulse">{part}</mark> 
+                : part
+            )}
+          </>
+        );
+      }
+    } catch (e) {
+      // Continue to fallback
+    }
+
+    // ATTEMPT 2: FUZZY WORD MATCH (if exact phrase isn't found because AI modified it slightly)
+    const stopWords = ['yang', 'dari', 'pada', 'atau', 'untuk', 'dengan', 'bahwa', 'kami', 'maka', 'dan', 'ini', 'itu', 'sebagai', 'atas', 'hari', 'tanggal', 'bulan', 'tahun', 'kepada', 'dalam', 'hal', 'rp', 'no'];
+    
+    const words = highlight
+      .split(/\s+/)
+      .map(w => w.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '')) // Strip leading/trailing punctuation from each word
+      .filter(w => w.length > 2 && !stopWords.includes(w.toLowerCase()));
+      
+    if (words.length === 0) return text;
+    
+    const safeWords = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    
+    try {
+      // Sort so longer words are processed/matched first just in case
+      safeWords.sort((a, b) => b.length - a.length);
+      const fuzzyRegex = new RegExp(`(${safeWords.join('|')})`, 'gi');
+      const parts = text.split(fuzzyRegex);
       
       return (
         <>
           {parts.map((part, i) => 
-            // the matched group is always at odd indices when using split with capture groups
             i % 2 === 1 
-              ? <mark key={i} className="bg-yellow-400 text-slate-900 px-1 rounded font-bold shadow-lg shadow-yellow-500/20 animate-pulse">{part}</mark> 
+              ? <mark key={i} className="bg-yellow-300 text-slate-900 px-1 rounded shadow-sm">{part}</mark> 
               : part
           )}
         </>
