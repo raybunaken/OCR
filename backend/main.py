@@ -187,6 +187,17 @@ def extract_from_image_vision(base64_image):
             content = content.split("```json")[1].split("```")[0]
         elif "```" in content:
             content = content.split("```")[1].split("```")[0]
+        
+        # Remove <think> tags if present
+        import re
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        
+        # Find first { and last } to extract just the JSON
+        start_idx = content.find('{')
+        end_idx = content.rfind('}')
+        if start_idx != -1 and end_idx != -1:
+            content = content[start_idx:end_idx+1]
+            
         return json.loads(content.strip())
     except Exception as e:
         print("ERROR GROQ VISION:", e)
