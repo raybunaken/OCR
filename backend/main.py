@@ -120,7 +120,7 @@ def rapikan_teks(teks_mentah):
     }
     if len(teks_mentah.strip()) < 20: return fallback_data
     
-    if not groq_client:
+    if not groq_clients:
         fallback_data["teks_asli"] = "WARNING: GROQ_API_KEY belum dikonfigurasi di .env Server!\n\n" + teks_mentah
         return fallback_data
         
