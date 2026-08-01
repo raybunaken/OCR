@@ -11,6 +11,7 @@ export default function Home() {
   const [extractedData, setExtractedData] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
   const [deleteModalData, setDeleteModalData] = useState<any>(null);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [highlightedWord, setHighlightedWord] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
