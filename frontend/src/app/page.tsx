@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -13,6 +13,20 @@ export default function Home() {
   const [deleteModalData, setDeleteModalData] = useState<any>(null);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [showAuditModal, setShowAuditModal] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const highlightInSource = (textToFind: string) => {
+    if (!textToFind || textToFind === "-" || !extractedData?.teks_asli || !textareaRef.current) return;
+    
+    const sourceText = extractedData.teks_asli.toLowerCase();
+    const targetText = textToFind.toLowerCase();
+    const startIndex = sourceText.indexOf(targetText);
+    
+    if (startIndex !== -1) {
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(startIndex, startIndex + textToFind.length);
+    }
+  };
 
   // States untuk Pencarian Ultimate
   const [searchQuery, setSearchQuery] = useState("");
@@ -409,26 +423,26 @@ export default function Home() {
                 <div className="space-y-5 mb-8">
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Principal</label>
-                    <input type="text" value={extractedData.principal || ""} onChange={(e) => setExtractedData({...extractedData, principal: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
+                    <input type="text" value={extractedData.principal || ""} onFocus={() => highlightInSource(extractedData.principal)} onChange={(e) => setExtractedData({...extractedData, principal: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Obligee</label>
-                    <input type="text" value={extractedData.obligee || ""} onChange={(e) => setExtractedData({...extractedData, obligee: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
+                    <input type="text" value={extractedData.obligee || ""} onFocus={() => highlightInSource(extractedData.obligee)} onChange={(e) => setExtractedData({...extractedData, obligee: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
                       <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Jenis Jaminan</label>
-                      <input type="text" value={extractedData.jenis_jaminan || ""} onChange={(e) => setExtractedData({...extractedData, jenis_jaminan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
+                      <input type="text" value={extractedData.jenis_jaminan || ""} onFocus={() => highlightInSource(extractedData.jenis_jaminan)} onChange={(e) => setExtractedData({...extractedData, jenis_jaminan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Nilai Jaminan</label>
-                      <input type="text" value={extractedData.nilai_jaminan || ""} onChange={(e) => setExtractedData({...extractedData, nilai_jaminan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
+                      <input type="text" value={extractedData.nilai_jaminan || ""} onFocus={() => highlightInSource(extractedData.nilai_jaminan)} onChange={(e) => setExtractedData({...extractedData, nilai_jaminan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
                     </div>
                   </div>
                   <div className="relative">
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Masa Berlaku</label>
                     <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-                      <input type="text" value={extractedData.masa_berlaku || ""} onChange={(e) => setExtractedData({...extractedData, masa_berlaku: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
+                      <input type="text" value={extractedData.masa_berlaku || ""} onFocus={() => highlightInSource(extractedData.masa_berlaku)} onChange={(e) => setExtractedData({...extractedData, masa_berlaku: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
                       {(() => {
                         const days = calculateDays(extractedData.masa_berlaku);
                         if (days !== null) {
@@ -445,7 +459,7 @@ export default function Home() {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Pekerjaan</label>
-                    <textarea rows={3} value={extractedData.pekerjaan || ""} onChange={(e) => setExtractedData({...extractedData, pekerjaan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3 resize-none overflow-y-auto" />
+                    <textarea rows={3} value={extractedData.pekerjaan || ""} onFocus={() => highlightInSource(extractedData.pekerjaan)} onChange={(e) => setExtractedData({...extractedData, pekerjaan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3 resize-none overflow-y-auto" />
                   </div>
                 </div>
 
@@ -476,6 +490,7 @@ export default function Home() {
                 </div>
                 <div className="p-6">
                   <textarea 
+                    ref={textareaRef}
                     rows={35} 
                     value={extractedData.teks_asli || ""} 
                     onChange={(e) => setExtractedData({...extractedData, teks_asli: e.target.value})} 
