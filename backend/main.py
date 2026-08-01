@@ -126,7 +126,8 @@ def rapikan_teks(teks_mentah):
         chat = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
-            temperature=0.2
+            temperature=0.2,
+            response_format={"type": "json_object"}
         )
         content = chat.choices[0].message.content
         if "```json" in content:
@@ -180,7 +181,8 @@ def extract_from_image_vision(base64_image):
                 }
             ],
             model="qwen/qwen3.6-27b",
-            temperature=0.2
+            temperature=0.2,
+            response_format={"type": "json_object"}
         )
         content = chat.choices[0].message.content
         if "```json" in content:
