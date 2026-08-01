@@ -15,8 +15,26 @@ from contextlib import asynccontextmanager
 
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+GROQ_API_KEYS = [k.strip() for k in os.getenv("GROQ_API_KEY", "").split(",") if k.strip()]
+groq_clients = [Groq(api_key=k) for k in GROQ_API_KEYS]
+
+def call_groq_api(**kwargs):
+    if not groq_clients:
+        raise Exception("Tidak ada GROQ_API_KEY yang dikonfigurasi.")
+        
+    last_exception = None
+    for i, client in enumerate(groq_clients):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as e:
+            last_exception = e
+            error_str = str(e).lower()
+            if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str or "413" in error_str:
+                print(f"Fallback (Key {i+1} Limit): Mencoba kunci berikutnya... Error: {e}")
+                continue
+            break
+            
+    raise last_exception
 
 # Ambil URL Database PostgreSQL (Neon) dari environment variable
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -123,7 +141,7 @@ def rapikan_teks(teks_mentah):
             "Jika ada data yang tidak ditemukan, isi dengan '-'.\n"
             "Teks OCR:\n" + teks_mentah
         )
-        chat = groq_client.chat.completions.create(
+        chat = call_groq_api(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             temperature=0.2,
@@ -147,7 +165,7 @@ def extract_from_image_vision(base64_image):
         "principal": "-", "obligee": "-", "pekerjaan": "-", 
         "masa_berlaku": "-", "teks_asli": "Pengekstrakan dari gambar."
     }
-    if not groq_client:
+    if not groq_clients:
         return fallback_data
         
     try:
@@ -166,7 +184,7 @@ def extract_from_image_vision(base64_image):
             "}\n"
             "Jika data tidak ditemukan, isi '-'. Jangan tambahkan teks lain selain JSON."
         )
-        chat = groq_client.chat.completions.create(
+        chat = call_groq_api(
             messages=[
                 {
                     "role": "user",
