@@ -199,7 +199,7 @@ def extract_from_image_vision(base64_image):
                     ]
                 }
             ],
-            model="llama-3.2-90b-vision-preview",
+            model="qwen/qwen3.6-27b",
             temperature=0.2,
             max_tokens=4000,
             response_format={"type": "json_object"}
