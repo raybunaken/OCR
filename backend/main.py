@@ -112,6 +112,42 @@ def get_db_connection():
 def encode_image_bytes(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
+def parse_robust_json(content, fallback_data):
+    if not content:
+        return fallback_data
+    # 1. Clean markdown & think tags
+    clean = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+    if "```json" in clean:
+        clean = clean.split("```json")[1].split("```")[0]
+    elif "```" in clean:
+        clean = clean.split("```")[1].split("```")[0]
+        
+    start_idx = clean.find('{')
+    end_idx = clean.rfind('}')
+    
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        json_candidate = clean[start_idx:end_idx+1]
+        try:
+            parsed = json.loads(json_candidate.strip())
+            for k in fallback_data:
+                if k in parsed and parsed[k]:
+                    fallback_data[k] = parsed[k]
+            return fallback_data
+        except Exception:
+            pass
+            
+    # 2. Regex field extractor if JSON was truncated or malformed
+    keys = ["jenis_jaminan", "nomor_jaminan", "nilai_jaminan", "principal", "obligee", "pekerjaan", "masa_berlaku", "teks_asli"]
+    for k in keys:
+        match = re.search(rf'"{k}"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', clean, re.DOTALL)
+        if match:
+            fallback_data[k] = match.group(1).replace('\\"', '"')
+            
+    if not fallback_data["teks_asli"] or fallback_data["teks_asli"] == "-":
+        fallback_data["teks_asli"] = clean.strip()
+        
+    return fallback_data
+
 def rapikan_teks(teks_mentah):
     fallback_data = {
         "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
@@ -138,51 +174,46 @@ def rapikan_teks(teks_mentah):
             '  "masa_berlaku": "... (Jangka waktu/Tanggal berlaku)",\n'
             '  "teks_asli": "... (Rapikan teks OCR. Beri jarak baris/enter baru untuk setiap pergantian informasi atau poin penomoran (1, 2, 3). JANGAN gabungkan semuanya menjadi satu blok paragraf panjang.)"\n'
             "}\n"
-            "Jika ada data yang tidak ditemukan, isi dengan '-'.\n"
+            "Jika ada data yang tidak ditemukan, isi dengan '-'. Jangan gunakan tag <think>.\n"
             "Teks OCR:\n" + teks_mentah
         )
         chat = call_groq_api(
             messages=[{"role": "user", "content": prompt}],
             model="openai/gpt-oss-120b",
-            temperature=0.2,
-            max_tokens=4000,
-            response_format={"type": "json_object"}
+            temperature=0.1,
+            max_tokens=4000
         )
         content = chat.choices[0].message.content
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-        return json.loads(content.strip())
+        return parse_robust_json(content, fallback_data)
     except Exception as e:
         print("ERROR AI EXTRACTION:", e)
         return fallback_data
+
 
 def extract_from_image_vision(base64_image):
     """Mengekstrak data JSON langsung dari gambar menggunakan Groq Vision"""
     fallback_data = {
         "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
         "principal": "-", "obligee": "-", "pekerjaan": "-", 
-        "masa_berlaku": "-", "teks_asli": "Pengekstrakan dari gambar."
+        "masa_berlaku": "-", "teks_asli": ""
     }
     if not groq_clients:
         return fallback_data
         
     try:
         prompt = (
-            "Anda adalah sistem OCR asuransi. Ekstrak informasi dari gambar Surety Bond ini "
-            "dan berikan respons HANYA berupa JSON murni dengan struktur berikut:\n"
+            "Anda adalah sistem OCR asuransi Surety Bond. Ekstrak data penting dari gambar dokumen ini ke JSON valid:\n"
             "{\n"
             '  "jenis_jaminan": "... (Jaminan Pelaksanaan, Uang Muka, dll)",\n'
             '  "nomor_jaminan": "...",\n'
             '  "nilai_jaminan": "...",\n'
-            '  "principal": "... (Nama Terjamin)",\n'
+            '  "principal": "... (Nama Terjamin/Pemohon)",\n'
             '  "obligee": "... (Penerima Jaminan)",\n'
             '  "pekerjaan": "... (Nama Proyek)",\n'
             '  "masa_berlaku": "...",\n'
-            '  "teks_asli": "... (Transkrip seluruh isi teks dokumen dari atas sampai bawah)"\n'
+            '  "teks_asli": "... (Transkrip teks utama dan ringkasan isi dokumen)"\n'
             "}\n"
-            "Jika data tidak ditemukan, isi '-'. Jangan tambahkan teks lain selain JSON."
+            "PENTING: Jangan gunakan tag <think>. Langsung berikan JSON murni tanpa pengantar atau penjelasan."
         )
         chat = call_groq_api(
             messages=[
@@ -190,37 +221,16 @@ def extract_from_image_vision(base64_image):
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
-                        }
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                     ]
                 }
             ],
             model="qwen/qwen3.6-27b",
-            temperature=0.2,
-            max_tokens=4000,
-            response_format={"type": "json_object"}
+            temperature=0.1,
+            max_tokens=3500
         )
         content = chat.choices[0].message.content
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-        
-        # Remove <think> tags if present
-        import re
-        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
-        
-        # Find first { and last } to extract just the JSON
-        start_idx = content.find('{')
-        end_idx = content.rfind('}')
-        if start_idx != -1 and end_idx != -1:
-            content = content[start_idx:end_idx+1]
-            
-        return json.loads(content.strip())
+        return parse_robust_json(content, fallback_data)
     except Exception as e:
         print("ERROR GROQ VISION:", e)
         fallback_data["teks_asli"] = "Pengekstrakan gagal: " + str(e)
