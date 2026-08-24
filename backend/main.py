@@ -192,7 +192,7 @@ def rapikan_teks(teks_mentah):
 
 
 def extract_from_image_vision(base64_image):
-    """Mengekstrak data JSON langsung dari gambar menggunakan Groq Vision"""
+    """Mengekstrak teks dari gambar dengan Groq Vision lalu menstrukturkannya dengan GPT-120B"""
     fallback_data = {
         "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
         "principal": "-", "obligee": "-", "pekerjaan": "-", 
@@ -202,36 +202,36 @@ def extract_from_image_vision(base64_image):
         return fallback_data
         
     try:
-        prompt = (
-            "Anda adalah sistem OCR asuransi Surety Bond. Ekstrak data penting dari gambar dokumen ini ke JSON valid:\n"
-            "{\n"
-            '  "jenis_jaminan": "... (Jaminan Pelaksanaan, Uang Muka, dll)",\n'
-            '  "nomor_jaminan": "...",\n'
-            '  "nilai_jaminan": "...",\n'
-            '  "principal": "... (Nama Terjamin/Pemohon)",\n'
-            '  "obligee": "... (Penerima Jaminan)",\n'
-            '  "pekerjaan": "... (Nama Proyek)",\n'
-            '  "masa_berlaku": "...",\n'
-            '  "teks_asli": "... (Transkrip teks utama dan ringkasan isi dokumen)"\n'
-            "}\n"
-            "PENTING: Jangan gunakan tag <think>. Langsung berikan JSON murni tanpa pengantar atau penjelasan."
-        )
+        # Step 1: Gunakan Qwen Vision sebagai mesin OCR murni
+        ocr_prompt = "Lakukan OCR pada gambar dokumen Surety Bond ini. Transkripsikan semua teks yang terlihat pada gambar secara lengkap, jelas, dan akurat."
         chat = call_groq_api(
             messages=[
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": prompt},
+                        {"type": "text", "text": ocr_prompt},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                     ]
                 }
             ],
             model="qwen/qwen3.6-27b",
             temperature=0.1,
-            max_tokens=3500
+            max_tokens=3000
         )
-        content = chat.choices[0].message.content
-        return parse_robust_json(content, fallback_data)
+        raw_content = chat.choices[0].message.content
+        
+        # Bersihkan tag <think> jika ada
+        clean_text = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
+        if not clean_text:
+            clean_text = raw_content.replace("<think>", "").replace("</think>", "").strip()
+            
+        if len(clean_text) < 15:
+            fallback_data["teks_asli"] = "Tidak ada teks yang dapat dibaca dari gambar."
+            return fallback_data
+            
+        # Step 2: Kirim teks OCR ke GPT-120B untuk ekstraksi JSON rapi
+        return rapikan_teks(clean_text)
+        
     except Exception as e:
         print("ERROR GROQ VISION:", e)
         fallback_data["teks_asli"] = "Pengekstrakan gagal: " + str(e)
