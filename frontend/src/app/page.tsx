@@ -253,25 +253,25 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen p-8 max-w-7xl mx-auto">
+    <main className="min-h-screen px-4 sm:px-8 py-10 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex justify-between items-center mb-10">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
         <div>
-          <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-600 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-600 tracking-tight">
             Ekstraktor Asuransi AI
           </h1>
-          <p className="text-slate-400 mt-2">Sistem Manajemen Dokumen Asuransi Berbasis AI</p>
+          <p className="text-slate-400 mt-2 text-sm sm:text-base">Sistem Manajemen Dokumen Asuransi Berbasis AI</p>
         </div>
-        <div className="glass-panel rounded-full p-1 flex gap-2">
+        <div className="glass-panel rounded-full p-1.5 flex gap-2 self-start md:self-auto shadow-lg shadow-black/20">
           <button 
             onClick={() => setActiveTab("dashboard")}
-            className={`px-6 py-2 rounded-full font-medium transition-all ${activeTab === "dashboard" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
+            className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${activeTab === "dashboard" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
           >
             Dashboard
           </button>
           <button 
             onClick={() => setActiveTab("upload")}
-            className={`px-6 py-2 rounded-full font-medium transition-all ${activeTab === "upload" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
+            className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${activeTab === "upload" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
           >
             Upload Dokumen
           </button>
@@ -436,13 +436,13 @@ export default function Home() {
           </div>
         </div>
       ) : (
-        <div className={extractedData ? "grid grid-cols-1 xl:grid-cols-12 gap-8 max-w-[1500px] mx-auto w-full" : "max-w-3xl mx-auto space-y-6"}>
+        <div className={extractedData ? "grid grid-cols-1 xl:grid-cols-12 gap-8 max-w-[1500px] mx-auto w-full" : "max-w-2xl mx-auto space-y-6 pt-4 pb-12"}>
           
           {/* KOLOM KIRI: Upload & Data Terstruktur */}
           <div className={extractedData ? "xl:col-span-5 space-y-8" : ""}>
             
             {/* 1. Kotak Upload */}
-            <div className="glass-panel p-8 rounded-3xl text-center border-dashed border-2 border-slate-600 hover:border-sky-500 transition-colors">
+            <div className={`glass-panel rounded-3xl text-center border-dashed border-2 border-slate-600 hover:border-sky-500 transition-colors ${extractedData ? "p-8" : "p-10 sm:p-14"}`}>
               <div className="w-16 h-16 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-6">
                 <svg className="w-8 h-8 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
               </div>
@@ -571,10 +571,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Footer Watermark */}
-      <div className="mt-12 text-center text-slate-600 text-xs tracking-widest uppercase font-semibold">
-        Powered by RayBunaken
-      </div>
+
 
       {/* Modal Konfirmasi Hapus */}
       {deleteModalData && (
