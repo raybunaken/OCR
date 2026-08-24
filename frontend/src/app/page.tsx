@@ -133,34 +133,7 @@ export default function Home() {
     return 0;
   });
 
-  const exportToCSV = () => {
-    if (filteredDocuments.length === 0) {
-      toast.error("Tidak ada data untuk diekspor.");
-      return;
-    }
-    const headers = ["ID", "Tanggal", "Nama Klien", "Jenis Dokumen", "Nomor Identitas", "Nilai Proyek", "Obligee", "Pekerjaan", "Masa Berlaku"];
-    const rows = filteredDocuments.map(doc => [
-      doc.id,
-      doc.created_at ? doc.created_at.substring(0, 10) : "-",
-      `"${(doc.nama_klien || "-").replace(/"/g, '""')}"`,
-      `"${(doc.jenis_dokumen || "-").replace(/"/g, '""')}"`,
-      `"${(doc.nomor_identitas || "-").replace(/"/g, '""')}"`,
-      `"${(doc.nilai_proyek || "-").replace(/"/g, '""')}"`,
-      `"${(doc.obligee || "-").replace(/"/g, '""')}"`,
-      `"${(doc.pekerjaan || "-").replace(/"/g, '""')}"`,
-      `"${(doc.masa_berlaku || "-").replace(/"/g, '""')}"`,
-    ]);
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `arsip_asuransi_${new Date().toISOString().substring(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success("Data berhasil diekspor ke Excel/CSV!");
-  };
+
 
   // Fetch Documents
   const fetchDocuments = async () => {
@@ -382,17 +355,7 @@ export default function Home() {
                       {filteredDocuments.length} Dokumen
                     </span>
                   </h2>
-                  <p className="text-slate-400 text-xs sm:text-sm mt-1">Kelola dan telusuri seluruh riwayat dokumen asuransi yang tersimpan</p>
-                </div>
-                
-                <div className="flex items-center gap-3 w-full sm:w-auto">
-                  <button 
-                    onClick={exportToCSV}
-                    className="cursor-pointer bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/40 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 w-full sm:w-auto shadow-md shadow-emerald-950/40"
-                  >
-                    <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    Export Excel / CSV
-                  </button>
+                  <p className="text-slate-400 text-xs sm:text-sm mt-1">Daftar seluruh riwayat dokumen asuransi yang tersimpan</p>
                 </div>
               </div>
 
@@ -427,11 +390,11 @@ export default function Home() {
                     onChange={(e) => setFilterType(e.target.value)}
                     className="w-full glass-input rounded-xl px-4 py-2.5 text-sm bg-slate-900 border border-slate-700/80 focus:border-sky-400 cursor-pointer text-slate-200"
                   >
-                    <option value="Semua" className="bg-slate-900 text-slate-200">🔍 Semua Jenis Jaminan</option>
-                    <option value="Pelaksanaan" className="bg-slate-900 text-slate-200">🛡️ Jaminan Pelaksanaan</option>
-                    <option value="Uang Muka" className="bg-slate-900 text-slate-200">💵 Jaminan Uang Muka</option>
-                    <option value="Penawaran" className="bg-slate-900 text-slate-200">📝 Jaminan Penawaran</option>
-                    <option value="Pemeliharaan" className="bg-slate-900 text-slate-200">🔧 Jaminan Pemeliharaan</option>
+                    <option value="Semua" className="bg-slate-900 text-slate-200">Semua Jenis Jaminan</option>
+                    <option value="Pelaksanaan" className="bg-slate-900 text-slate-200">Jaminan Pelaksanaan</option>
+                    <option value="Uang Muka" className="bg-slate-900 text-slate-200">Jaminan Uang Muka</option>
+                    <option value="Penawaran" className="bg-slate-900 text-slate-200">Jaminan Penawaran</option>
+                    <option value="Pemeliharaan" className="bg-slate-900 text-slate-200">Jaminan Pemeliharaan</option>
                   </select>
                 </div>
 
@@ -442,7 +405,7 @@ export default function Home() {
                     onChange={(e) => setFilterMonth(e.target.value)}
                     className="w-full glass-input rounded-xl px-4 py-2.5 text-sm bg-slate-900 border border-slate-700/80 focus:border-sky-400 cursor-pointer text-slate-200"
                   >
-                    <option value="Semua" className="bg-slate-900 text-slate-200">📅 Semua Bulan</option>
+                    <option value="Semua" className="bg-slate-900 text-slate-200">Semua Bulan</option>
                     <option value="01" className="bg-slate-900 text-slate-200">Januari</option>
                     <option value="02" className="bg-slate-900 text-slate-200">Februari</option>
                     <option value="03" className="bg-slate-900 text-slate-200">Maret</option>
@@ -465,12 +428,12 @@ export default function Home() {
                     onChange={(e) => setSortBy(e.target.value)}
                     className="w-full glass-input rounded-xl px-4 py-2.5 text-sm bg-slate-900 border border-slate-700/80 focus:border-sky-400 cursor-pointer text-slate-200"
                   >
-                    <option value="Terbaru" className="bg-slate-900 text-slate-200">🕒 Urutkan: Paling Baru</option>
-                    <option value="Terlama" className="bg-slate-900 text-slate-200">⏳ Urutkan: Paling Lama</option>
-                    <option value="Nilai Tertinggi" className="bg-slate-900 text-slate-200">💰 Urutkan: Nilai Tertinggi</option>
-                    <option value="Nilai Terendah" className="bg-slate-900 text-slate-200">🏷️ Urutkan: Nilai Terendah</option>
-                    <option value="Nama (A-Z)" className="bg-slate-900 text-slate-200">🔤 Urutkan: Klien (A → Z)</option>
-                    <option value="Nama (Z-A)" className="bg-slate-900 text-slate-200">🔤 Urutkan: Klien (Z → A)</option>
+                    <option value="Terbaru" className="bg-slate-900 text-slate-200">Urutkan: Paling Baru</option>
+                    <option value="Terlama" className="bg-slate-900 text-slate-200">Urutkan: Paling Lama</option>
+                    <option value="Nilai Tertinggi" className="bg-slate-900 text-slate-200">Urutkan: Nilai Tertinggi</option>
+                    <option value="Nilai Terendah" className="bg-slate-900 text-slate-200">Urutkan: Nilai Terendah</option>
+                    <option value="Nama (A-Z)" className="bg-slate-900 text-slate-200">Urutkan: Klien (A → Z)</option>
+                    <option value="Nama (Z-A)" className="bg-slate-900 text-slate-200">Urutkan: Klien (Z → A)</option>
                   </select>
                 </div>
               </div>
