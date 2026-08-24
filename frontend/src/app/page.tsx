@@ -83,16 +83,39 @@ export default function Home() {
     }
   };
 
-  // States untuk Pencarian Ultimate
+  // Helper to parse numeric values from currency string (e.g. "Rp. 1.373.689.860,00" -> 1373689860)
+  const parseNumericValue = (valStr: string) => {
+    if (!valStr || valStr === "-") return 0;
+    const cleaned = valStr.replace(/\./g, "").replace(/,/g, ".");
+    const num = parseFloat(cleaned.replace(/[^0-9.]/g, ""));
+    return isNaN(num) ? 0 : num;
+  };
+
+  // States untuk Pencarian Ultimate & Filter
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("Semua");
   const [filterMonth, setFilterMonth] = useState("Semua");
   const [sortBy, setSortBy] = useState("Terbaru");
 
+  const resetFilters = () => {
+    setSearchQuery("");
+    setFilterType("Semua");
+    setFilterMonth("Semua");
+    setSortBy("Terbaru");
+  };
+
+  const isFiltered = searchQuery !== "" || filterType !== "Semua" || filterMonth !== "Semua" || sortBy !== "Terbaru";
+
   // Filter & Sort Otomatis (Real-time)
   const filteredDocuments = documents.filter((doc) => {
-    const matchesSearch = doc.nama_klien?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          doc.nilai_proyek?.toLowerCase().includes(searchQuery.toLowerCase());
+    const query = searchQuery.toLowerCase().trim();
+    const matchesSearch = !query ? true : (
+      (doc.nama_klien?.toLowerCase() || "").includes(query) || 
+      (doc.nilai_proyek?.toLowerCase() || "").includes(query) ||
+      (doc.nomor_identitas?.toLowerCase() || "").includes(query) ||
+      (doc.obligee?.toLowerCase() || "").includes(query) ||
+      (doc.pekerjaan?.toLowerCase() || "").includes(query)
+    );
     const matchesType = filterType === "Semua" ? true : doc.jenis_dokumen?.toLowerCase().includes(filterType.toLowerCase());
     
     // Asumsi doc.created_at formatnya "YYYY-MM-DD HH:MM:SS"
@@ -103,8 +126,41 @@ export default function Home() {
   }).sort((a, b) => {
     if (sortBy === "Terbaru") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     if (sortBy === "Terlama") return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    if (sortBy === "Nilai Tertinggi") return parseNumericValue(b.nilai_proyek) - parseNumericValue(a.nilai_proyek);
+    if (sortBy === "Nilai Terendah") return parseNumericValue(a.nilai_proyek) - parseNumericValue(b.nilai_proyek);
+    if (sortBy === "Nama (A-Z)") return (a.nama_klien || "").localeCompare(b.nama_klien || "");
+    if (sortBy === "Nama (Z-A)") return (b.nama_klien || "").localeCompare(a.nama_klien || "");
     return 0;
   });
+
+  const exportToCSV = () => {
+    if (filteredDocuments.length === 0) {
+      toast.error("Tidak ada data untuk diekspor.");
+      return;
+    }
+    const headers = ["ID", "Tanggal", "Nama Klien", "Jenis Dokumen", "Nomor Identitas", "Nilai Proyek", "Obligee", "Pekerjaan", "Masa Berlaku"];
+    const rows = filteredDocuments.map(doc => [
+      doc.id,
+      doc.created_at ? doc.created_at.substring(0, 10) : "-",
+      `"${(doc.nama_klien || "-").replace(/"/g, '""')}"`,
+      `"${(doc.jenis_dokumen || "-").replace(/"/g, '""')}"`,
+      `"${(doc.nomor_identitas || "-").replace(/"/g, '""')}"`,
+      `"${(doc.nilai_proyek || "-").replace(/"/g, '""')}"`,
+      `"${(doc.obligee || "-").replace(/"/g, '""')}"`,
+      `"${(doc.pekerjaan || "-").replace(/"/g, '""')}"`,
+      `"${(doc.masa_berlaku || "-").replace(/"/g, '""')}"`,
+    ]);
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `arsip_asuransi_${new Date().toISOString().substring(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Data berhasil diekspor ke Excel/CSV!");
+  };
 
   // Fetch Documents
   const fetchDocuments = async () => {
@@ -315,56 +371,146 @@ export default function Home() {
           </div>
 
           {/* Table */}
-          <div className="glass-panel rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-slate-700/50 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-              <h2 className="text-xl font-semibold">Arsip Jaminan Asuransi</h2>
-              <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full xl:w-auto">
-                <input 
-                  type="text" 
-                  placeholder="Cari nama / harga..." 
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="glass-input rounded-full px-4 py-2 text-sm w-full sm:w-48 focus:w-full sm:focus:w-64 transition-all" 
-                />
-                <select 
-                  value={filterType}
-                  onChange={(e) => setFilterType(e.target.value)}
-                  className="glass-input rounded-full px-4 py-2 text-sm appearance-none cursor-pointer"
-                >
-                  <option value="Semua">Semua Jenis</option>
-                  <option value="Pelaksanaan">Jaminan Pelaksanaan</option>
-                  <option value="Uang Muka">Jaminan Uang Muka</option>
-                  <option value="Penawaran">Jaminan Penawaran</option>
-                  <option value="Pemeliharaan">Jaminan Pemeliharaan</option>
-                </select>
-                <select 
-                  value={filterMonth}
-                  onChange={(e) => setFilterMonth(e.target.value)}
-                  className="glass-input rounded-full px-4 py-2 text-sm appearance-none cursor-pointer"
-                >
-                  <option value="Semua">Semua Bulan</option>
-                  <option value="01">Januari</option>
-                  <option value="02">Februari</option>
-                  <option value="03">Maret</option>
-                  <option value="04">April</option>
-                  <option value="05">Mei</option>
-                  <option value="06">Juni</option>
-                  <option value="07">Juli</option>
-                  <option value="08">Agustus</option>
-                  <option value="09">September</option>
-                  <option value="10">Oktober</option>
-                  <option value="11">November</option>
-                  <option value="12">Desember</option>
-                </select>
-                <select 
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="glass-input rounded-full px-4 py-2 text-sm appearance-none cursor-pointer"
-                >
-                  <option value="Terbaru">Paling Baru</option>
-                  <option value="Terlama">Paling Lama</option>
-                </select>
+          <div className="glass-panel rounded-3xl overflow-hidden shadow-2xl border border-slate-700/60">
+            {/* Top Toolbar */}
+            <div className="p-6 sm:p-8 border-b border-slate-700/60 bg-slate-900/40 space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-3">
+                    Arsip Jaminan Asuransi
+                    <span className="text-xs font-semibold px-3 py-1 rounded-full bg-sky-950/80 text-sky-400 border border-sky-800/60">
+                      {filteredDocuments.length} Dokumen
+                    </span>
+                  </h2>
+                  <p className="text-slate-400 text-xs sm:text-sm mt-1">Kelola dan telusuri seluruh riwayat dokumen asuransi yang tersimpan</p>
+                </div>
+                
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <button 
+                    onClick={exportToCSV}
+                    className="cursor-pointer bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/40 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 w-full sm:w-auto shadow-md shadow-emerald-950/40"
+                  >
+                    <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    Export Excel / CSV
+                  </button>
+                </div>
               </div>
+
+              {/* Filters & Search Control Bar */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 pt-2">
+                {/* Search Bar */}
+                <div className="sm:col-span-2 lg:col-span-4 relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                  </div>
+                  <input 
+                    type="text" 
+                    placeholder="Cari klien, nomor, obligee, proyek..." 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full glass-input rounded-xl pl-10 pr-10 py-2.5 text-sm bg-slate-900/60 border border-slate-700/80 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 transition-all placeholder:text-slate-500" 
+                  />
+                  {searchQuery && (
+                    <button 
+                      onClick={() => setSearchQuery("")}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter: Jenis Jaminan */}
+                <div className="lg:col-span-3 relative">
+                  <select 
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value)}
+                    className="w-full glass-input rounded-xl px-4 py-2.5 text-sm bg-slate-900 border border-slate-700/80 focus:border-sky-400 cursor-pointer text-slate-200"
+                  >
+                    <option value="Semua" className="bg-slate-900 text-slate-200">🔍 Semua Jenis Jaminan</option>
+                    <option value="Pelaksanaan" className="bg-slate-900 text-slate-200">🛡️ Jaminan Pelaksanaan</option>
+                    <option value="Uang Muka" className="bg-slate-900 text-slate-200">💵 Jaminan Uang Muka</option>
+                    <option value="Penawaran" className="bg-slate-900 text-slate-200">📝 Jaminan Penawaran</option>
+                    <option value="Pemeliharaan" className="bg-slate-900 text-slate-200">🔧 Jaminan Pemeliharaan</option>
+                  </select>
+                </div>
+
+                {/* Filter: Bulan */}
+                <div className="lg:col-span-2 relative">
+                  <select 
+                    value={filterMonth}
+                    onChange={(e) => setFilterMonth(e.target.value)}
+                    className="w-full glass-input rounded-xl px-4 py-2.5 text-sm bg-slate-900 border border-slate-700/80 focus:border-sky-400 cursor-pointer text-slate-200"
+                  >
+                    <option value="Semua" className="bg-slate-900 text-slate-200">📅 Semua Bulan</option>
+                    <option value="01" className="bg-slate-900 text-slate-200">Januari</option>
+                    <option value="02" className="bg-slate-900 text-slate-200">Februari</option>
+                    <option value="03" className="bg-slate-900 text-slate-200">Maret</option>
+                    <option value="04" className="bg-slate-900 text-slate-200">April</option>
+                    <option value="05" className="bg-slate-900 text-slate-200">Mei</option>
+                    <option value="06" className="bg-slate-900 text-slate-200">Juni</option>
+                    <option value="07" className="bg-slate-900 text-slate-200">Juli</option>
+                    <option value="08" className="bg-slate-900 text-slate-200">Agustus</option>
+                    <option value="09" className="bg-slate-900 text-slate-200">September</option>
+                    <option value="10" className="bg-slate-900 text-slate-200">Oktober</option>
+                    <option value="11" className="bg-slate-900 text-slate-200">November</option>
+                    <option value="12" className="bg-slate-900 text-slate-200">Desember</option>
+                  </select>
+                </div>
+
+                {/* Sort By */}
+                <div className="lg:col-span-3 relative">
+                  <select 
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="w-full glass-input rounded-xl px-4 py-2.5 text-sm bg-slate-900 border border-slate-700/80 focus:border-sky-400 cursor-pointer text-slate-200"
+                  >
+                    <option value="Terbaru" className="bg-slate-900 text-slate-200">🕒 Urutkan: Paling Baru</option>
+                    <option value="Terlama" className="bg-slate-900 text-slate-200">⏳ Urutkan: Paling Lama</option>
+                    <option value="Nilai Tertinggi" className="bg-slate-900 text-slate-200">💰 Urutkan: Nilai Tertinggi</option>
+                    <option value="Nilai Terendah" className="bg-slate-900 text-slate-200">🏷️ Urutkan: Nilai Terendah</option>
+                    <option value="Nama (A-Z)" className="bg-slate-900 text-slate-200">🔤 Urutkan: Klien (A → Z)</option>
+                    <option value="Nama (Z-A)" className="bg-slate-900 text-slate-200">🔤 Urutkan: Klien (Z → A)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Active Filter Chips / Reset */}
+              {isFiltered && (
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/80">
+                  <span className="text-xs text-slate-400 font-medium">Filter Aktif:</span>
+                  {searchQuery && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-sky-900/40 text-sky-300 border border-sky-700/50">
+                      Pencarian: "{searchQuery}"
+                      <button onClick={() => setSearchQuery("")} className="hover:text-white cursor-pointer">✕</button>
+                    </span>
+                  )}
+                  {filterType !== "Semua" && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-900/40 text-indigo-300 border border-indigo-700/50">
+                      Jenis: {filterType}
+                      <button onClick={() => setFilterType("Semua")} className="hover:text-white cursor-pointer">✕</button>
+                    </span>
+                  )}
+                  {filterMonth !== "Semua" && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-900/40 text-amber-300 border border-amber-700/50">
+                      Bulan: {filterMonth}
+                      <button onClick={() => setFilterMonth("Semua")} className="hover:text-white cursor-pointer">✕</button>
+                    </span>
+                  )}
+                  {sortBy !== "Terbaru" && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-900/40 text-purple-300 border border-purple-700/50">
+                      Urutan: {sortBy}
+                      <button onClick={() => setSortBy("Terbaru")} className="hover:text-white cursor-pointer">✕</button>
+                    </span>
+                  )}
+                  <button 
+                    onClick={resetFilters}
+                    className="text-xs text-red-400 hover:text-red-300 underline ml-auto font-medium cursor-pointer"
+                  >
+                    Reset Semua Filter
+                  </button>
+                </div>
+              )}
             </div>
             <div className="overflow-x-auto min-h-[300px]">
               <table className="w-full text-left text-sm">
