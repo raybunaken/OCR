@@ -258,28 +258,7 @@ export default function Home() {
     }
   };
 
-  const calculateDays = (dateStr: string) => {
-    if (!dateStr || dateStr === "-") return null;
-    const months = {
-      "januari": 0, "jan": 0, "februari": 1, "feb": 1, "maret": 2, "mar": 2,
-      "april": 3, "apr": 3, "mei": 4, "juni": 5, "jun": 5, "juli": 6, "jul": 6,
-      "agustus": 7, "agu": 7, "agt": 7, "september": 8, "sep": 8,
-      "oktober": 9, "okt": 9, "november": 10, "nov": 10, "desember": 11, "des": 11
-    };
-    const regex = /(\d{1,2})\s*([a-zA-Z]+)\s*(\d{4})/g;
-    let matches = [...dateStr.matchAll(regex)];
-    if (matches.length >= 2) {
-      const d1 = parseInt(matches[0][1]), y1 = parseInt(matches[0][3]);
-      const m1 = months[matches[0][2].toLowerCase() as keyof typeof months];
-      const d2 = parseInt(matches[1][1]), y2 = parseInt(matches[1][3]);
-      const m2 = months[matches[1][2].toLowerCase() as keyof typeof months];
-      if (m1 !== undefined && m2 !== undefined) {
-        const diffTime = Math.abs(new Date(y2, m2, d2).getTime() - new Date(y1, m1, d1).getTime());
-        return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      }
-    }
-    return null;
-  };
+
 
   return (
     <main className="min-h-screen px-4 sm:px-8 py-10 max-w-7xl mx-auto">
@@ -311,21 +290,14 @@ export default function Home() {
       {activeTab === "dashboard" ? (
         <div className="space-y-8">
           {/* Metrics */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="glass-panel p-6 rounded-2xl">
-              <h3 className="text-slate-400 text-sm font-semibold uppercase tracking-wider">Total Dokumen (Berdasarkan Filter)</h3>
-              <p className="text-4xl font-light text-white mt-2">{filteredDocuments.length}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-slate-700/60 shadow-xl">
+              <h3 className="text-slate-400 text-xs sm:text-sm font-semibold uppercase tracking-wider">Total Dokumen (Berdasarkan Filter)</h3>
+              <p className="text-4xl sm:text-5xl font-light text-white mt-3">{filteredDocuments.length}</p>
             </div>
-            <div className="glass-panel p-6 rounded-2xl">
-              <h3 className="text-slate-400 text-sm font-semibold uppercase tracking-wider">Status Server</h3>
-              <div className="flex items-center gap-2 mt-2">
-                <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
-                <p className="text-2xl font-light text-white">Online</p>
-              </div>
-            </div>
-            <div className="glass-panel p-6 rounded-2xl bg-gradient-to-br from-sky-900/40 to-blue-900/40 border-sky-500/30">
-              <h3 className="text-sky-300 text-sm font-semibold uppercase tracking-wider">Total Nilai Proyek (Berdasarkan Filter)</h3>
-              <p className="text-4xl font-light text-white mt-2">
+            <div className="glass-panel p-6 sm:p-8 rounded-3xl bg-gradient-to-br from-sky-950/40 via-slate-900/60 to-blue-950/40 border border-sky-500/30 shadow-xl shadow-sky-950/20">
+              <h3 className="text-sky-300 text-xs sm:text-sm font-semibold uppercase tracking-wider">Total Nilai Proyek (Berdasarkan Filter)</h3>
+              <p className="text-4xl sm:text-5xl font-light text-white mt-3">
                 {(() => {
                   const total = filteredDocuments.reduce((sum, doc) => {
                     if (!doc.nilai_proyek || doc.nilai_proyek === "-") return sum;
@@ -603,23 +575,9 @@ export default function Home() {
                       <input type="text" value={extractedData.nilai_jaminan || ""} onFocus={() => highlightInSource(extractedData.nilai_jaminan)} onChange={(e) => setExtractedData({...extractedData, nilai_jaminan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
                     </div>
                   </div>
-                  <div className="relative">
+                  <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Masa Berlaku</label>
-                    <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-                      <input type="text" value={extractedData.masa_berlaku || ""} onFocus={() => highlightInSource(extractedData.masa_berlaku)} onChange={(e) => setExtractedData({...extractedData, masa_berlaku: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
-                      {(() => {
-                        const days = calculateDays(extractedData.masa_berlaku);
-                        if (days !== null) {
-                          return (
-                            <div className="bg-sky-900/40 border border-sky-500/30 text-sky-400 font-semibold px-4 py-3 rounded-xl whitespace-nowrap flex items-center gap-2 animate-in zoom-in duration-300">
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                              {days} Hari
-                            </div>
-                          )
-                        }
-                        return null;
-                      })()}
-                    </div>
+                    <input type="text" value={extractedData.masa_berlaku || ""} onFocus={() => highlightInSource(extractedData.masa_berlaku)} onChange={(e) => setExtractedData({...extractedData, masa_berlaku: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Pekerjaan</label>
