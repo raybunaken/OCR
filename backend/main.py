@@ -288,12 +288,17 @@ def save_document(doc: DocumentUpdate):
 
 @app.delete("/api/documents/{doc_id}")
 def delete_document(doc_id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM dokumen WHERE id=%s", (doc_id,))
-    conn.commit()
-    conn.close()
-    return {"status": "success"}
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM audit_logs WHERE doc_id=%s", (doc_id,))
+        cursor.execute("DELETE FROM dokumen WHERE id=%s", (doc_id,))
+        conn.commit()
+        conn.close()
+        return {"status": "success"}
+    except Exception as e:
+        print("ERROR DELETE:", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/documents/{doc_id}")
 def update_document(doc_id: int, doc: DocumentUpdate):
