@@ -9,3 +9,4 @@ Pillow
 psycopg2-binary
 python-dotenv
 openpyxl
+requests

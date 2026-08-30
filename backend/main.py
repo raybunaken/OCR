@@ -5,6 +5,7 @@ import json
 import base64
 import fitz
 import datetime
+import requests
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
@@ -89,18 +90,12 @@ def init_db():
     conn.close()
 
 def sync_to_google_sheets(payload):
-    webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL")
+    webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbyqR2iO8lRtSNnJQWWzUXqHAqSpLYF5w2E5I10E-LPsViQpVUBymdEMRzjG_BnIRcqX8g/exec")
     if not webhook_url:
         return
     try:
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(
-            webhook_url,
-            data=data,
-            headers={'Content-Type': 'application/json'}
-        )
-        urllib.request.urlopen(req, timeout=5)
-        print("SUCCESS SYNC TO GOOGLE SHEETS")
+        res = requests.post(webhook_url, json=payload, timeout=10)
+        print("GOOGLE SHEETS SYNC STATUS:", res.status_code, res.text[:200])
     except Exception as e:
         print("GOOGLE SHEETS SYNC NOTICE:", e)
 
