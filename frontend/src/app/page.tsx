@@ -253,20 +253,29 @@ export default function Home() {
   const calculateDays = (dateStr: string) => {
     if (!dateStr || dateStr === "-") return null;
 
-    // 1. Prioritas 1: Cek jika ada angka eksplisit hari e.g. "120 (Seratus Dua Puluh) hari" atau "180 Hari"
-    const explicitMatch = dateStr.match(/(\d+)\s*(?:\([^)]*\)\s*)?(?:hari|day)/i);
+    // 1. Prioritas 1: Jika ada angka eksplisit hari e.g. "120 HK", "120 HKal", "120 Hari", "120 (Seratus Dua Puluh) hari"
+    const explicitMatch = dateStr.match(/(\d+)\s*(?:\([^)]*\)\s*)?(?:hari|days?|hk\b|hkal\b|h\.k)/i);
     if (explicitMatch) {
       return parseInt(explicitMatch[1], 10);
     }
 
-    // 2. Prioritas 2: Format rentang tanggal teks e.g. "12 Agustus 2026 - 07 Januari 2027"
+    // 2. Kamus bulan lengkap (termasuk ejaan lokal Indonesia seperti Nopember, Pebruari, Agust, dll)
     const months: Record<string, number> = {
-      "januari": 0, "jan": 0, "februari": 1, "feb": 1, "maret": 2, "mar": 2,
-      "april": 3, "apr": 3, "mei": 4, "may": 4, "juni": 5, "jun": 5, "juli": 6, "jul": 6,
-      "agustus": 7, "agu": 7, "agt": 7, "aug": 7, "august": 7, "september": 8, "sep": 8, "sept": 8,
-      "oktober": 9, "okt": 9, "oct": 9, "october": 9, "november": 10, "nov": 10, "desember": 11, "des": 11, "dec": 11, "december": 11
+      "januari": 0, "jan": 0, "january": 0,
+      "februari": 1, "pebruari": 1, "feb": 1, "peb": 1, "february": 1,
+      "maret": 2, "mar": 2, "march": 2,
+      "april": 3, "apr": 3,
+      "mei": 4, "may": 4,
+      "juni": 5, "jun": 5, "june": 5,
+      "juli": 6, "jul": 6, "july": 6,
+      "agustus": 7, "agu": 7, "agt": 7, "agus": 7, "agust": 7, "aug": 7, "august": 7,
+      "september": 8, "sep": 8, "sept": 8,
+      "oktober": 9, "okt": 9, "oct": 9, "october": 9,
+      "november": 10, "nopember": 10, "nov": 10, "nop": 10,
+      "desember": 11, "des": 11, "dec": 11, "december": 11
     };
 
+    // Format tanggal teks e.g. "3 AGUSTUS 2026 S/D 30 NOPEMBER 2026"
     const textDateRegex = /(\d{1,2})\s*([a-zA-Z]+)\s*(\d{4})/g;
     const matches = [...dateStr.matchAll(textDateRegex)];
     if (matches.length >= 2) {
@@ -282,7 +291,7 @@ export default function Home() {
       }
     }
 
-    // 3. Prioritas 3: Rentang tanggal numerik e.g. "12/08/2026 - 07/01/2027" atau "12-08-2026 s/d 07-01-2027"
+    // Format tanggal numerik e.g. "03/08/2026 - 30/11/2026" atau "03-08-2026 s/d 30-11-2026"
     const numDateRegex = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/g;
     const numMatches = [...dateStr.matchAll(numDateRegex)];
     if (numMatches.length >= 2) {
