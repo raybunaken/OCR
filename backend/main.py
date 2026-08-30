@@ -5,13 +5,16 @@ import json
 import base64
 import fitz
 import datetime
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import urllib.request
 from pydantic import BaseModel
 import psycopg2
 import psycopg2.extras
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 from groq import Groq
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
@@ -517,3 +520,93 @@ def get_audit_logs(doc_id: int):
              log_dict['created_at'] = log_dict['created_at'].strftime("%Y-%m-%d %H:%M:%S")
         result.append(log_dict)
     return result
+
+@app.get("/api/documents/export/excel")
+def export_documents_excel():
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM dokumen ORDER BY id ASC")
+    docs = cursor.fetchall()
+    conn.close()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "REGISTER SURETY BOND"
+
+    # Title Header
+    ws.merge_cells("A1:J1")
+    ws["A1"] = "REGISTER LAPORAN SURETY BOND & BANK GARANSI"
+    ws["A1"].font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
+    ws["A1"].fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 35
+
+    # Table Headers
+    headers = [
+        "NO. POLIS", "JENIS BOND", "PRINCIPAL (TERJAMIN)", "OBLIGEE (PENERIMA)", 
+        "NAMA PEKERJAAN / PROYEK", "NILAI BOND", "TGL TERBIT", "TGL AWAL", "TGL AKHIR", "JUMLAH HK"
+    ]
+
+    header_fill = PatternFill(start_color="0284C7", end_color="0284C7", fill_type="solid")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    thin_border = Border(
+        left=Side(style='thin', color='D1D5DB'),
+        right=Side(style='thin', color='D1D5DB'),
+        top=Side(style='thin', color='D1D5DB'),
+        bottom=Side(style='thin', color='D1D5DB')
+    )
+
+    ws.row_dimensions[2].height = 28
+    for col_num, h in enumerate(headers, 1):
+        cell = ws.cell(row=2, column=col_num)
+        cell.value = h
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+
+    alt_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    for r_idx, doc in enumerate(docs, 3):
+        d = dict(doc)
+        no_polis = d.get("nomor_identitas") or "-"
+        jenis_bond = d.get("kode_jenis") or ("MB" if "pemeliharaan" in str(d.get("jenis_dokumen", "")).lower() else "PB" if "pelaksanaan" in str(d.get("jenis_dokumen", "")).lower() else "APB" if "uang muka" in str(d.get("jenis_dokumen", "")).lower() else "BB" if "penawaran" in str(d.get("jenis_dokumen", "")).lower() else "PB")
+        principal = d.get("nama_klien") or "-"
+        obligee = d.get("obligee") or "-"
+        pekerjaan = d.get("pekerjaan") or "-"
+        nilai_bond = d.get("nilai_proyek") or "-"
+        tgl_terbit = d.get("tgl_terbit") or d.get("tgl_awal") or "-"
+        tgl_awal = d.get("tgl_awal") or "-"
+        tgl_akhir = d.get("tgl_akhir") or "-"
+        durasi_hk = d.get("durasi_hk") or "-"
+
+        row = [no_polis, jenis_bond, principal, obligee, pekerjaan, nilai_bond, tgl_terbit, tgl_awal, tgl_akhir, durasi_hk]
+        ws.row_dimensions[r_idx].height = 24
+        for c_idx, val in enumerate(row, 1):
+            cell = ws.cell(row=r_idx, column=c_idx)
+            cell.value = val
+            cell.font = Font(name="Calibri", size=10)
+            cell.border = thin_border
+            if r_idx % 2 == 0:
+                cell.fill = alt_fill
+            if c_idx in [1, 2, 7, 8, 9, 10]:
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif c_idx == 6:
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            else:
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 45)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    filename = f"Register_Surety_Bond_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
