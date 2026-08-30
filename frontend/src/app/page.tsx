@@ -250,6 +250,53 @@ export default function Home() {
     }
   };
 
+  const calculateDays = (dateStr: string) => {
+    if (!dateStr || dateStr === "-") return null;
+
+    // 1. Prioritas 1: Cek jika ada angka eksplisit hari e.g. "120 (Seratus Dua Puluh) hari" atau "180 Hari"
+    const explicitMatch = dateStr.match(/(\d+)\s*(?:\([^)]*\)\s*)?(?:hari|day)/i);
+    if (explicitMatch) {
+      return parseInt(explicitMatch[1], 10);
+    }
+
+    // 2. Prioritas 2: Format rentang tanggal teks e.g. "12 Agustus 2026 - 07 Januari 2027"
+    const months: Record<string, number> = {
+      "januari": 0, "jan": 0, "februari": 1, "feb": 1, "maret": 2, "mar": 2,
+      "april": 3, "apr": 3, "mei": 4, "may": 4, "juni": 5, "jun": 5, "juli": 6, "jul": 6,
+      "agustus": 7, "agu": 7, "agt": 7, "aug": 7, "august": 7, "september": 8, "sep": 8, "sept": 8,
+      "oktober": 9, "okt": 9, "oct": 9, "october": 9, "november": 10, "nov": 10, "desember": 11, "des": 11, "dec": 11, "december": 11
+    };
+
+    const textDateRegex = /(\d{1,2})\s*([a-zA-Z]+)\s*(\d{4})/g;
+    const matches = [...dateStr.matchAll(textDateRegex)];
+    if (matches.length >= 2) {
+      const d1 = parseInt(matches[0][1], 10), y1 = parseInt(matches[0][3], 10);
+      const m1 = months[matches[0][2].toLowerCase()];
+      const d2 = parseInt(matches[1][1], 10), y2 = parseInt(matches[1][3], 10);
+      const m2 = months[matches[1][2].toLowerCase()];
+      if (m1 !== undefined && m2 !== undefined) {
+        const date1 = new Date(y1, m1, d1);
+        const date2 = new Date(y2, m2, d2);
+        const diffTime = Math.abs(date2.getTime() - date1.getTime());
+        return Math.round(diffTime / (1000 * 60 * 60 * 24));
+      }
+    }
+
+    // 3. Prioritas 3: Rentang tanggal numerik e.g. "12/08/2026 - 07/01/2027" atau "12-08-2026 s/d 07-01-2027"
+    const numDateRegex = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/g;
+    const numMatches = [...dateStr.matchAll(numDateRegex)];
+    if (numMatches.length >= 2) {
+      const d1 = parseInt(numMatches[0][1], 10), m1 = parseInt(numMatches[0][2], 10) - 1, y1 = parseInt(numMatches[0][3], 10);
+      const d2 = parseInt(numMatches[1][1], 10), m2 = parseInt(numMatches[1][2], 10) - 1, y2 = parseInt(numMatches[1][3], 10);
+      const date1 = new Date(y1, m1, d1);
+      const date2 = new Date(y2, m2, d2);
+      const diffTime = Math.abs(date2.getTime() - date1.getTime());
+      return Math.round(diffTime / (1000 * 60 * 60 * 24));
+    }
+
+    return null;
+  };
+
   const fetchAuditLogs = async (docId: number) => {
     try {
       const res = await fetch(`${API_URL}/api/documents/${docId}/logs`);
@@ -580,7 +627,29 @@ export default function Home() {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Masa Berlaku</label>
-                    <input type="text" value={extractedData.masa_berlaku || ""} onFocus={() => highlightInSource(extractedData.masa_berlaku)} onChange={(e) => setExtractedData({...extractedData, masa_berlaku: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
+                    <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                      <input 
+                        type="text" 
+                        value={extractedData.masa_berlaku || ""} 
+                        onFocus={() => highlightInSource(extractedData.masa_berlaku)} 
+                        onChange={(e) => setExtractedData({...extractedData, masa_berlaku: e.target.value})} 
+                        className="w-full glass-input rounded-xl px-4 py-3" 
+                      />
+                      {(() => {
+                        const days = calculateDays(extractedData.masa_berlaku);
+                        if (days !== null) {
+                          return (
+                            <div className="bg-sky-950/70 border border-sky-500/40 text-sky-300 font-semibold px-4 py-3 rounded-xl whitespace-nowrap flex items-center gap-2 shadow-md shadow-sky-950/50 animate-in zoom-in-95 duration-200">
+                              <svg className="w-4 h-4 text-sky-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              <span>{days} Hari</span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Pekerjaan</label>
