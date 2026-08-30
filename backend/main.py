@@ -161,34 +161,81 @@ def rapikan_teks(teks_mentah):
         fallback_data["teks_asli"] = "WARNING: GROQ_API_KEY belum dikonfigurasi di .env Server!\n\n" + teks_mentah
         return fallback_data
         
+    base_prompt = (
+        "Anda adalah asisten AI ahli administrasi asuransi Surety Bond & Bank Garansi Indonesia.\n"
+        "Tugas Anda mengekstrak informasi penting dari teks dokumen menjadi format JSON murni.\n\n"
+        "PANDUAN EKSTRAKSI DOMAIN:\n"
+        "- principal: Nama Perusahaan/Badan Hukum Pemohon/Terjamin/Penyedia/Kontraktor (contoh: CV. ..., PT. ...)\n"
+        "- obligee: Nama Penerima Jaminan/Pemilik Proyek/Pemilik Pekerjaan/Pejabat Pembuat Komitmen (PPK)/Dinas/Kementerian/BUMN/Perusahaan Pemberi Kerja\n"
+        "- jenis_jaminan: Jenis jaminan (Jaminan Pelaksanaan, Jaminan Uang Muka, Jaminan Penawaran, Jaminan Pemeliharaan, Surety Bond, dll)\n"
+        "- nilai_jaminan: Nilai nominal jaminan atau nilai proyek (sertakan 'Rp' dan angka lengkap)\n"
+        "- nomor_jaminan: Nomor identitas jaminan / nomor surat / nomor permohonan / SPPBJ / register\n"
+        "- pekerjaan: Nama kegiatan / pengadaan / paket proyek pekerjaan\n"
+        "- masa_berlaku: Jangka waktu jaminan / jumlah hari kalender (HK) / rentang tanggal berlaku (contoh: 120 HK atau tanggal s/d tanggal)\n"
+        "- teks_asli: Rapikan teks OCR dengan jarak baris/enter baru untuk tiap poin penomoran atau pergantian data\n\n"
+        "Format respons HANYA JSON:\n"
+        "{\n"
+        '  "jenis_jaminan": "...",\n'
+        '  "nomor_jaminan": "...",\n'
+        '  "nilai_jaminan": "...",\n'
+        '  "principal": "...",\n'
+        '  "obligee": "...",\n'
+        '  "pekerjaan": "...",\n'
+        '  "masa_berlaku": "...",\n'
+        '  "teks_asli": "..."\n'
+        "}\n"
+        "Jangan gunakan tag <think>. Jika kolom benar-benar tidak ada di teks, isi '-'.\n\n"
+        "Teks OCR Dokumen:\n" + teks_mentah
+    )
+    
+    result_data = dict(fallback_data)
     try:
-        prompt = (
-            "Anda adalah asisten admin asuransi. Tugas Anda adalah mengekstrak teks menjadi format JSON.\n"
-            "Ekstrak informasi penting dari dokumen Surety Bond dan berikan respons HANYA berupa JSON murni dengan struktur berikut:\n"
-            "{\n"
-            '  "jenis_jaminan": "... (contoh: Jaminan Pelaksanaan, Jaminan Uang Muka, dll)",\n'
-            '  "nomor_jaminan": "... (nomor Bond/Jaminan)",\n'
-            '  "nilai_jaminan": "... (nilai uang)",\n'
-            '  "principal": "... (Nama Terjamin/Penyedia)",\n'
-            '  "obligee": "... (Penerima Jaminan/Pemilik Pekerjaan)",\n'
-            '  "pekerjaan": "... (Nama Pekerjaan/Proyek)",\n'
-            '  "masa_berlaku": "... (Jangka waktu/Tanggal berlaku)",\n'
-            '  "teks_asli": "... (Rapikan teks OCR. Beri jarak baris/enter baru untuk setiap pergantian informasi atau poin penomoran (1, 2, 3). JANGAN gabungkan semuanya menjadi satu blok paragraf panjang.)"\n'
-            "}\n"
-            "Jika ada data yang tidak ditemukan, isi dengan '-'. Jangan gunakan tag <think>.\n"
-            "Teks OCR:\n" + teks_mentah
-        )
         chat = call_groq_api(
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": base_prompt}],
             model="openai/gpt-oss-120b",
             temperature=0.1,
             max_tokens=4000
         )
-        content = chat.choices[0].message.content
-        return parse_robust_json(content, fallback_data)
+        result_data = parse_robust_json(chat.choices[0].message.content, result_data)
     except Exception as e:
-        print("ERROR AI EXTRACTION:", e)
-        return fallback_data
+        print("ERROR AI EXTRACTION ATTEMPT 1:", e)
+        
+    # Auto-Retry Loop jika ada kolom penting yang masih '-' (Maksimal 3 kali percobaan bertarget)
+    critical_keys = ["principal", "obligee", "nilai_jaminan", "pekerjaan", "masa_berlaku", "jenis_jaminan"]
+    max_retries = 3
+    for attempt in range(2, max_retries + 1):
+        missing_keys = [k for k in critical_keys if not result_data.get(k) or result_data[k] == "-"]
+        if not missing_keys:
+            break
+            
+        print(f"AUTO-RETRY {attempt}/{max_retries} for missing keys: {missing_keys}")
+        retry_prompt = (
+            f"PERHATIAN: Kolom penting berikut belum ditemukan pada pembacaan awal: {', '.join(missing_keys)}.\n"
+            "Mohon teliti kembali teks dokumen di bawah ini secara mendalam baris demi baris.\n"
+            "Petunjuk Khusus:\n"
+            "- Jika 'obligee' belum ada: cari bagian PENERIMA JAMINAN, PEMILIK PROYEK, PEJABAT PEMBUAT KOMITMEN (PPK), DINAS, INSTANSI, atau PERUSAHAAN PEMBERI KERJA.\n"
+            "- Jika 'principal' belum ada: cari bagian PEMOHON, TERJAMIN, PENYEDIA JASA, NAMA PERUSAHAAN (PT/CV).\n"
+            "- Jika 'nilai_jaminan' belum ada: cari simbol 'Rp', nilai jaminan %, atau nominal angka kontrak.\n"
+            "- Jika 'pekerjaan' belum ada: cari nama paket pekerjaan, pengadaan barang/jasa, atau pembangunan.\n\n"
+            "Berikan respons JSON HANYA untuk kolom-kolom yang masih kosong tersebut:\n"
+            "{\n" + ",\n".join([f'  "{k}": "..."' for k in missing_keys]) + "\n}\n"
+            "Teks Dokumen:\n" + teks_mentah
+        )
+        try:
+            chat_retry = call_groq_api(
+                messages=[{"role": "user", "content": retry_prompt}],
+                model="openai/gpt-oss-120b",
+                temperature=0.2,
+                max_tokens=2000
+            )
+            retry_parsed = parse_robust_json(chat_retry.choices[0].message.content, {})
+            for k in missing_keys:
+                if retry_parsed.get(k) and retry_parsed[k] != "-":
+                    result_data[k] = retry_parsed[k]
+        except Exception as err:
+            print(f"ERROR ON AUTO-RETRY {attempt}:", err)
+            
+    return result_data
 
 
 def extract_from_image_vision(base64_image):

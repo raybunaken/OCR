@@ -12,6 +12,7 @@ export default function Home() {
   const [documents, setDocuments] = useState<any[]>([]);
   const [deleteModalData, setDeleteModalData] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [highlightedWord, setHighlightedWord] = useState("");
@@ -317,6 +318,26 @@ export default function Home() {
     }
   };
 
+  const handleCopyAll = () => {
+    if (!extractedData) return;
+    const days = calculateDays(extractedData.masa_berlaku);
+    const durationText = days !== null ? ` (${days} Hari)` : "";
+
+    const textToCopy = [
+      `Principal     : ${extractedData.principal || "-"}`,
+      `Obligee       : ${extractedData.obligee || "-"}`,
+      `Jenis Jaminan : ${extractedData.jenis_jaminan || "-"}`,
+      `Nilai Jaminan : ${extractedData.nilai_jaminan || "-"}`,
+      `Masa Berlaku  : ${extractedData.masa_berlaku || "-"}${durationText}`,
+      `Pekerjaan     : ${extractedData.pekerjaan || "-"}`
+    ].join("\n");
+
+    navigator.clipboard.writeText(textToCopy);
+    setIsCopied(true);
+    toast.success("Semua data terstruktur berhasil disalin!");
+    setTimeout(() => setIsCopied(false), 2500);
+  };
+
 
 
   return (
@@ -610,9 +631,37 @@ export default function Home() {
             {/* 2. Kotak Form Data (Muncul setelah ekstrak) */}
             {extractedData && (
               <div className="glass-panel p-8 rounded-3xl animate-in fade-in slide-in-from-left-8 duration-500">
-                <div className="flex items-center gap-3 mb-6 border-b border-slate-700/50 pb-4">
-                  <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]"></div>
-                  <h2 className="text-lg font-semibold text-slate-200 tracking-wide">Data Terstruktur</h2>
+                <div className="flex items-center justify-between gap-3 mb-6 border-b border-slate-700/50 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]"></div>
+                    <h2 className="text-lg font-semibold text-slate-200 tracking-wide">Data Terstruktur</h2>
+                  </div>
+                  
+                  <button 
+                    onClick={handleCopyAll}
+                    className={`cursor-pointer px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 border shadow-sm ${
+                      isCopied 
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-emerald-950/40" 
+                        : "bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border-slate-700/80 hover:border-slate-600 shadow-black/20"
+                    }`}
+                    title="Salin seluruh data terstruktur ke clipboard"
+                  >
+                    {isCopied ? (
+                      <>
+                        <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span>Tersalin!</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        <span>Salin Semua</span>
+                      </>
+                    )}
+                  </button>
                 </div>
                 
                 <div className="space-y-5 mb-8">
