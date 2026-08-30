@@ -14,6 +14,7 @@ export default function Home() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isCopiedExcel, setIsCopiedExcel] = useState(false);
   const [isCopiedText, setIsCopiedText] = useState(false);
+  const [isCopiedOcr, setIsCopiedOcr] = useState(false);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [highlightedWord, setHighlightedWord] = useState("");
@@ -374,6 +375,14 @@ export default function Home() {
     setTimeout(() => setIsCopiedText(false), 2500);
   };
 
+  const handleCopyOcr = () => {
+    if (!extractedData?.teks_asli) return;
+    navigator.clipboard.writeText(extractedData.teks_asli);
+    setIsCopiedOcr(true);
+    toast.success("Teks dokumen asli berhasil disalin!");
+    setTimeout(() => setIsCopiedOcr(false), 2500);
+  };
+
 
 
   return (
@@ -650,30 +659,30 @@ export default function Home() {
           </div>
         </div>
       ) : (
-        <div className={extractedData ? "grid grid-cols-1 xl:grid-cols-12 gap-8 max-w-[1500px] mx-auto w-full" : "max-w-2xl mx-auto space-y-6 pt-4 pb-12"}>
+        <div className={extractedData ? "grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full" : "max-w-2xl mx-auto space-y-6 pt-4 pb-12"}>
           
-          {/* KOLOM KIRI: Upload & Data Terstruktur */}
-          <div className={extractedData ? "xl:col-span-5 space-y-8" : ""}>
+          {/* KOLOM KIRI: Upload & Data Terstruktur (50% Split) */}
+          <div className={extractedData ? "lg:col-span-6 space-y-6" : ""}>
             
             {/* 1. Kotak Upload */}
-            <div className={`glass-panel rounded-3xl text-center border-dashed border-2 border-slate-600 hover:border-sky-500 transition-colors ${extractedData ? "p-8" : "p-10 sm:p-14"}`}>
-              <div className="w-16 h-16 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-6">
-                <svg className="w-8 h-8 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+            <div className={`glass-panel rounded-3xl text-center border-dashed border-2 border-slate-600 hover:border-sky-500 transition-colors ${extractedData ? "p-6" : "p-10 sm:p-14"}`}>
+              <div className="w-12 h-12 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
               </div>
-              <h2 className="text-xl font-semibold mb-2">Upload Dokumen</h2>
-              <p className="text-slate-400 mb-6 text-sm">Pilih file PDF, JPG, atau PNG.</p>
+              <h2 className="text-lg font-semibold mb-1">Upload Dokumen</h2>
+              <p className="text-slate-400 mb-4 text-xs">Pilih file PDF, JPG, atau PNG.</p>
               
               <input type="file" onChange={handleFileChange} className="hidden" id="file-upload" />
-              <label htmlFor="file-upload" className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-white px-8 py-3 rounded-full font-medium transition-colors inline-block mb-4">
+              <label htmlFor="file-upload" className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-white px-6 py-2.5 rounded-full text-xs font-semibold transition-colors inline-block mb-2 border border-slate-600/60">
                 {file ? file.name : "Browse Files"}
               </label>
               
               {file && (
-                <div className="mt-4">
+                <div className="mt-3">
                   <button 
                     onClick={handleUpload} 
                     disabled={isUploading}
-                    className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-10 py-3 rounded-full font-semibold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50"
+                    className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-2.5 rounded-full text-xs font-bold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50 cursor-pointer"
                   >
                     {isUploading ? "Memproses AI..." : "Ekstrak Sekarang"}
                   </button>
@@ -681,29 +690,30 @@ export default function Home() {
               )}
             </div>
 
-            {/* 2. Kotak Form Data (Muncul setelah ekstrak) */}
+            {/* 2. Kotak Form Data Terstruktur (Muncul setelah ekstrak) */}
             {extractedData && (
-              <div className="glass-panel p-8 rounded-3xl animate-in fade-in slide-in-from-left-8 duration-500">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 border-b border-slate-700/50 pb-4">
+              <div className="glass-panel p-6 sm:p-7 rounded-3xl animate-in fade-in slide-in-from-left-8 duration-500 border border-slate-700/70 shadow-2xl">
+                {/* Header Card with Clean Dual Copy Buttons */}
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-700/60">
                   <div className="flex items-center gap-3">
-                    <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]"></div>
+                    <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.9)] shrink-0"></div>
                     <div>
-                      <h2 className="text-lg font-semibold text-slate-200 tracking-wide">Data Terstruktur</h2>
-                      <p className="text-xs text-emerald-400/90 flex items-center gap-1.5 mt-0.5">
+                      <h2 className="text-lg font-bold text-white tracking-tight">Data Terstruktur</h2>
+                      <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        Terintegrasi Standar Register Excel & Google Sheets
-                      </p>
+                        <span className="text-[11px] text-emerald-400 font-medium">Terhubung Google Sheets</span>
+                      </div>
                     </div>
                   </div>
                   
-                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <div className="flex items-center gap-2">
                     {/* Tombol Salin Format Excel */}
                     <button 
                       onClick={handleCopyExcel}
-                      className={`cursor-pointer px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border shadow-sm ${
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm cursor-pointer whitespace-nowrap ${
                         isCopiedExcel 
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-emerald-950/40" 
-                          : "bg-emerald-950/50 hover:bg-emerald-900/60 text-emerald-300 border-emerald-700/50 shadow-black/20"
+                          ? "bg-emerald-500/30 text-emerald-300 border-emerald-400 shadow-emerald-950/50 scale-105" 
+                          : "bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border-emerald-700/60 hover:border-emerald-500"
                       }`}
                       title="Salin 1 baris format tabel Excel (langsung paste ke file Excel)"
                     >
@@ -712,14 +722,14 @@ export default function Home() {
                           <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
                           </svg>
-                          <span>Tersalin ke Excel!</span>
+                          <span>Tersalin!</span>
                         </>
                       ) : (
                         <>
                           <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                           </svg>
-                          <span>Salin Format Excel</span>
+                          <span>Salin Excel</span>
                         </>
                       )}
                     </button>
@@ -727,12 +737,12 @@ export default function Home() {
                     {/* Tombol Salin Rangkuman Teks */}
                     <button 
                       onClick={handleCopyText}
-                      className={`cursor-pointer px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border shadow-sm ${
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm cursor-pointer whitespace-nowrap ${
                         isCopiedText 
-                          ? "bg-sky-500/20 text-sky-300 border-sky-500/50 shadow-sky-950/40" 
-                          : "bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border-slate-700/80 hover:border-slate-600 shadow-black/20"
+                          ? "bg-sky-500/30 text-sky-300 border-sky-400 shadow-sky-950/50 scale-105" 
+                          : "bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700 hover:border-slate-600"
                       }`}
-                      title="Salin format teks ringkas untuk WhatsApp atau Catatan"
+                      title="Salin ringkasan teks untuk WhatsApp / Catatan"
                     >
                       {isCopiedText ? (
                         <>
@@ -753,30 +763,30 @@ export default function Home() {
                   </div>
                 </div>
                 
-                <div className="space-y-5 mb-8">
+                <div className="space-y-4 mb-6">
                   {/* Row 1: Nomor Polis & Jenis Bond */}
                   <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
                     <div className="sm:col-span-5">
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">No. Polis / Jaminan</label>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">No. Polis / Jaminan</label>
                       <input 
                         type="text" 
                         value={extractedData.nomor_jaminan || ""} 
                         placeholder="Contoh: PP10051126000044" 
                         onFocus={() => highlightInSource(extractedData.nomor_jaminan)} 
                         onChange={(e) => setExtractedData({...extractedData, nomor_jaminan: e.target.value})} 
-                        className="w-full glass-input rounded-xl px-4 py-3" 
+                        className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
                       />
                     </div>
                     <div className="sm:col-span-7">
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Jenis Bond (PB / MB / APB / BB)</label>
-                      <div className="flex flex-wrap gap-2 items-center">
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Jenis Bond</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         {[
-                          { code: "PB", label: "PB (Pelaksanaan)" },
-                          { code: "MB", label: "MB (Pemeliharaan)" },
-                          { code: "APB", label: "APB (Uang Muka)" },
-                          { code: "BB", label: "BB (Penawaran)" }
+                          { code: "PB", name: "PB", desc: "Pelaksanaan" },
+                          { code: "MB", name: "MB", desc: "Pemeliharaan" },
+                          { code: "APB", name: "APB", desc: "Uang Muka" },
+                          { code: "BB", name: "BB", desc: "Penawaran" }
                         ].map((b) => {
-                          const isSelected = (extractedData.kode_jenis === b.code) || (!extractedData.kode_jenis && extractedData.jenis_jaminan?.toLowerCase().includes(b.label.toLowerCase().split("(")[1]?.replace(")", "")));
+                          const isSelected = (extractedData.kode_jenis === b.code) || (!extractedData.kode_jenis && extractedData.jenis_jaminan?.toLowerCase().includes(b.desc.toLowerCase()));
                           return (
                             <button
                               key={b.code}
@@ -784,15 +794,16 @@ export default function Home() {
                               onClick={() => setExtractedData({
                                 ...extractedData, 
                                 kode_jenis: b.code,
-                                jenis_jaminan: b.code === "PB" ? "PB - Jaminan Pelaksanaan" : b.code === "MB" ? "MB - Jaminan Pemeliharaan" : b.code === "APB" ? "APB - Jaminan Uang Muka" : "BB - Jaminan Penawaran"
+                                jenis_jaminan: `${b.code} - Jaminan ${b.desc}`
                               })}
-                              className={`cursor-pointer px-3 py-2 rounded-xl text-xs font-bold transition-all border ${
+                              className={`cursor-pointer px-2 py-1.5 rounded-xl text-center transition-all border ${
                                 isSelected
-                                  ? "bg-sky-500 text-white border-sky-400 shadow-md shadow-sky-500/30 scale-105"
-                                  : "bg-slate-900/80 text-slate-400 border-slate-700/80 hover:text-slate-200 hover:border-slate-600"
+                                  ? "bg-sky-500 text-white border-sky-400 shadow-md shadow-sky-500/30 ring-1 ring-sky-300 scale-102 font-bold"
+                                  : "bg-slate-900/80 text-slate-300 border-slate-700/80 hover:bg-slate-800 hover:text-white hover:border-slate-600"
                               }`}
                             >
-                              {b.label}
+                              <div className="text-xs font-black tracking-wide leading-none">{b.code}</div>
+                              <div className="text-[9px] opacity-75 mt-0.5 truncate leading-none">{b.desc}</div>
                             </button>
                           );
                         })}
@@ -802,65 +813,65 @@ export default function Home() {
 
                   {/* Row 2: Principal */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Principal (Pemohon / Terjamin)</label>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Principal (Pemohon / Terjamin)</label>
                     <input 
                       type="text" 
                       value={extractedData.principal || ""} 
                       onFocus={() => highlightInSource(extractedData.principal)} 
                       onChange={(e) => setExtractedData({...extractedData, principal: e.target.value})} 
-                      className="w-full glass-input rounded-xl px-4 py-3" 
+                      className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
                     />
                   </div>
 
                   {/* Row 3: Obligee */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Obligee (Penerima Jaminan / Pemilik Proyek / PPK)</label>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Obligee (Penerima Jaminan / Pemilik Proyek / PPK)</label>
                     <input 
                       type="text" 
                       value={extractedData.obligee || ""} 
                       onFocus={() => highlightInSource(extractedData.obligee)} 
                       onChange={(e) => setExtractedData({...extractedData, obligee: e.target.value})} 
-                      className="w-full glass-input rounded-xl px-4 py-3" 
+                      className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
                     />
                   </div>
 
                   {/* Row 4: Nilai Bond & Tanggal Terbit */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Nilai Bond (Jaminan)</label>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Nilai Bond (Jaminan)</label>
                       <input 
                         type="text" 
                         value={extractedData.nilai_jaminan || ""} 
                         onFocus={() => highlightInSource(extractedData.nilai_jaminan)} 
                         onChange={(e) => setExtractedData({...extractedData, nilai_jaminan: e.target.value})} 
-                        className="w-full glass-input rounded-xl px-4 py-3 font-semibold text-emerald-400" 
+                        className="w-full glass-input rounded-xl px-3.5 py-2.5 font-bold text-emerald-400 text-sm" 
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Tanggal Terbit</label>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Tanggal Terbit</label>
                       <input 
                         type="text" 
                         value={extractedData.tgl_terbit || extractedData.tgl_awal || ""} 
                         placeholder="DD/MM/YYYY" 
                         onFocus={() => highlightInSource(extractedData.tgl_terbit)} 
                         onChange={(e) => setExtractedData({...extractedData, tgl_terbit: e.target.value})} 
-                        className="w-full glass-input rounded-xl px-4 py-3" 
+                        className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
                       />
                     </div>
                   </div>
 
                   {/* Row 5: Jangka Waktu (Masa Berlaku) */}
-                  <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700/60 space-y-3">
+                  <div className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-700/60 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Jangka Waktu Jaminan (Masa Berlaku)</label>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Jangka Waktu Jaminan</label>
                       {(() => {
                         const days = extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || (
                           extractedData.tgl_awal && extractedData.tgl_akhir ? calculateDays(`${extractedData.tgl_awal} s/d ${extractedData.tgl_akhir}`) : null
                         );
                         if (days) {
                           return (
-                            <span className="bg-sky-950 text-sky-300 border border-sky-500/40 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-                              <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <span className="bg-sky-950 text-sky-300 border border-sky-500/40 text-[11px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1">
+                              <svg className="w-3 h-3 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                               </svg>
                               {days} Hari Kerja (HK)
@@ -871,38 +882,38 @@ export default function Home() {
                       })()}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-3 gap-2.5">
                       <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tanggal Awal</span>
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tgl Awal</span>
                         <input 
                           type="text" 
                           placeholder="DD/MM/YYYY"
                           value={extractedData.tgl_awal || ""} 
                           onFocus={() => highlightInSource(extractedData.tgl_awal)} 
                           onChange={(e) => setExtractedData({...extractedData, tgl_awal: e.target.value})} 
-                          className="w-full glass-input rounded-xl px-3 py-2 text-sm" 
+                          className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center" 
                         />
                       </div>
                       <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tanggal Akhir</span>
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tgl Akhir</span>
                         <input 
                           type="text" 
                           placeholder="DD/MM/YYYY"
                           value={extractedData.tgl_akhir || ""} 
                           onFocus={() => highlightInSource(extractedData.tgl_akhir)} 
                           onChange={(e) => setExtractedData({...extractedData, tgl_akhir: e.target.value})} 
-                          className="w-full glass-input rounded-xl px-3 py-2 text-sm" 
+                          className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center" 
                         />
                       </div>
                       <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Jumlah Hari (HK)</span>
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Hari (HK)</span>
                         <input 
                           type="text" 
-                          placeholder="Contoh: 180"
+                          placeholder="Contoh: 120"
                           value={extractedData.durasi_hk || ""} 
                           onFocus={() => highlightInSource(extractedData.durasi_hk)} 
                           onChange={(e) => setExtractedData({...extractedData, durasi_hk: e.target.value})} 
-                          className="w-full glass-input rounded-xl px-3 py-2 text-sm font-bold text-sky-400" 
+                          className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center font-bold text-sky-400" 
                         />
                       </div>
                     </div>
@@ -910,28 +921,29 @@ export default function Home() {
 
                   {/* Row 6: Pekerjaan */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Nama Pekerjaan / Proyek</label>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Nama Pekerjaan / Proyek</label>
                     <textarea 
                       rows={3} 
                       value={extractedData.pekerjaan || ""} 
                       onFocus={() => highlightInSource(extractedData.pekerjaan)} 
                       onChange={(e) => setExtractedData({...extractedData, pekerjaan: e.target.value})} 
-                      className="w-full glass-input rounded-xl px-4 py-3 resize-none overflow-y-auto" 
+                      className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm resize-none overflow-y-auto" 
                     />
                   </div>
                 </div>
 
-                <div className="flex gap-4">
-                  <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3.5 rounded-xl font-semibold shadow-lg shadow-emerald-500/25 transition-all flex-1 cursor-pointer flex items-center justify-center gap-2">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {/* Bottom Buttons */}
+                <div className="flex gap-3">
+                  <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-lg shadow-emerald-500/25 transition-all flex-1 cursor-pointer flex items-center justify-center gap-2">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
                     </svg>
                     Simpan ke Database & Google Sheets
                   </button>
                   {extractedData.id && (
-                    <button onClick={() => fetchAuditLogs(extractedData.id)} className="bg-slate-800 hover:bg-slate-700 text-sky-400 px-6 py-3.5 rounded-xl font-semibold border border-slate-700 transition-all flex items-center gap-2 cursor-pointer">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      Riwayat Edit
+                    <button onClick={() => fetchAuditLogs(extractedData.id)} className="bg-slate-800 hover:bg-slate-700 text-sky-400 px-4 py-3 rounded-xl font-semibold text-xs border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      Riwayat
                     </button>
                   )}
                 </div>
@@ -939,34 +951,61 @@ export default function Home() {
             )}
           </div>
 
-          {/* KOLOM KANAN: Dokumen Word / Teks Asli Raksasa */}
+          {/* KOLOM KANAN (50%): Dokumen Asli OCR */}
           {extractedData && (
-            <div className="xl:col-span-7">
-              <div className="glass-panel rounded-3xl animate-in fade-in slide-in-from-right-8 duration-500 overflow-hidden bg-[#1e293b]/90 border-slate-600 shadow-2xl">
-                <div className="bg-slate-900/80 p-5 border-b border-slate-700/80 flex justify-between items-center">
-                  <h2 className="text-lg font-semibold text-slate-200 uppercase tracking-widest flex items-center gap-2">
+            <div className="lg:col-span-6">
+              <div className="glass-panel rounded-3xl animate-in fade-in slide-in-from-right-8 duration-500 overflow-hidden bg-[#1e293b]/90 border border-slate-700/80 shadow-2xl flex flex-col h-full min-h-[700px]">
+                {/* Header OCR */}
+                <div className="bg-slate-900/90 px-6 py-4 border-b border-slate-700/80 flex justify-between items-center shrink-0">
+                  <div className="flex items-center gap-2">
                     <svg className="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                    Dokumen Asli (OCR)
-                  </h2>
-                  <button 
-                    onClick={() => setIsEditMode(!isEditMode)}
-                    className="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-600 px-3 py-1.5 rounded-full transition-colors flex items-center gap-1.5 shadow-md shadow-sky-900/20"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-                    {isEditMode ? "Mode Tampilan" : "Edit Teks"}
-                  </button>
+                    <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Dokumen Asli (OCR)</h2>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={handleCopyOcr}
+                      className={`text-xs px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 border cursor-pointer ${
+                        isCopiedOcr 
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50" 
+                          : "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600/70"
+                      }`}
+                    >
+                      {isCopiedOcr ? (
+                        <>
+                          <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                          <span>Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                          <span>Salin Teks</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button 
+                      onClick={() => setIsEditMode(!isEditMode)}
+                      className="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-600/70 px-3 py-1.5 rounded-full transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                      {isEditMode ? "Mode Tampilan" : "Edit Teks"}
+                    </button>
+                  </div>
                 </div>
-                <div className="p-6">
+
+                {/* Content OCR Body */}
+                <div className="p-5 flex-1 flex flex-col">
                   {isEditMode ? (
                     <textarea 
-                      rows={35} 
+                      rows={30} 
                       value={extractedData.teks_asli || ""} 
                       onChange={(e) => setExtractedData({...extractedData, teks_asli: e.target.value})} 
-                      className="w-full bg-[#0f172a]/60 text-slate-100 p-8 rounded-2xl font-sans text-lg leading-loose resize-none focus:outline-none focus:bg-[#0f172a]/80 transition-colors border border-slate-700/50 shadow-inner"
+                      className="w-full flex-1 min-h-[600px] bg-[#0f172a]/70 text-slate-200 p-6 rounded-2xl font-sans text-sm sm:text-base leading-relaxed resize-none focus:outline-none focus:bg-[#0f172a]/90 transition-colors border border-slate-700/60 shadow-inner"
                       placeholder="Teks dokumen akan muncul di sini..."
                     />
                   ) : (
-                    <div className="w-full min-h-[700px] h-full bg-[#0f172a]/60 text-slate-100 p-8 rounded-2xl font-sans text-lg leading-loose whitespace-pre-wrap border border-slate-700/50 shadow-inner">
+                    <div className="w-full flex-1 min-h-[600px] bg-[#0f172a]/70 text-slate-200 p-6 rounded-2xl font-sans text-sm sm:text-base leading-relaxed whitespace-pre-wrap border border-slate-700/60 shadow-inner overflow-y-auto">
                       {renderHighlightedText(extractedData.teks_asli || "", highlightedWord)}
                     </div>
                   )}
