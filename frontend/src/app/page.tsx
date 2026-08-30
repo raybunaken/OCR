@@ -4,11 +4,23 @@ import { toast } from "sonner";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+interface BatchFileItem {
+  id: string;
+  file: File;
+  status: "pending" | "processing" | "done" | "error";
+  data?: any;
+  errorMsg?: string;
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [uploadMode, setUploadMode] = useState<"single" | "batch">("single");
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [extractedData, setExtractedData] = useState<any>(null);
+  const [batchFiles, setBatchFiles] = useState<BatchFileItem[]>([]);
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  const stopBatchRef = useRef(false);
   const [documents, setDocuments] = useState<any[]>([]);
   const [deleteModalData, setDeleteModalData] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -190,6 +202,195 @@ export default function Home() {
       toast.error(`Terjadi kesalahan jaringan: ${err.message}`);
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleBatchFilesSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const newFiles: BatchFileItem[] = Array.from(e.target.files).map((f) => ({
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      file: f,
+      status: "pending"
+    }));
+    setBatchFiles((prev) => [...prev, ...newFiles]);
+    e.target.value = "";
+    toast.success(`${newFiles.length} dokumen ditambahkan ke antrian.`);
+  };
+
+  const handleRemoveBatchItem = (id: string) => {
+    if (isBatchProcessing) return;
+    setBatchFiles((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleClearBatch = () => {
+    if (isBatchProcessing) return;
+    setBatchFiles([]);
+  };
+
+  const handleInspectBatchItem = (item: BatchFileItem) => {
+    if (!item.data) return;
+    setExtractedData(item.data);
+    setUploadMode("single");
+    toast.info(`Membuka hasil ekstraksi: ${item.file.name}`);
+  };
+
+  const startBatchProcessing = async () => {
+    if (batchFiles.length === 0 || isBatchProcessing) return;
+    setIsBatchProcessing(true);
+    stopBatchRef.current = false;
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < batchFiles.length; i++) {
+      if (stopBatchRef.current) {
+        toast.info("Proses antrian dihentikan oleh pengguna.");
+        break;
+      }
+
+      const item = batchFiles[i];
+      if (item.status === "done") {
+        successCount++;
+        continue;
+      }
+
+      // Update item to processing
+      setBatchFiles((prev) =>
+        prev.map((f, idx) => (idx === i ? { ...f, status: "processing" } : f))
+      );
+
+      try {
+        const formData = new FormData();
+        formData.append("file", item.file);
+
+        // 1. Ekstrak AI
+        const res = await fetch(`${API_URL}/api/extract`, {
+          method: "POST",
+          body: formData,
+        });
+        const result = await res.json();
+
+        if (res.ok && result.status === "success" && result.data) {
+          const extracted = result.data;
+          
+          // 2. Auto-Simpan ke Database & Auto-Sync Google Sheets
+          const payload = {
+            nama_klien: extracted.principal || "-",
+            jenis_dokumen: extracted.jenis_jaminan || "-",
+            nomor_identitas: extracted.nomor_jaminan || "-",
+            nilai_proyek: extracted.nilai_jaminan || "-",
+            obligee: extracted.obligee || "-",
+            pekerjaan: extracted.pekerjaan || "-",
+            masa_berlaku: extracted.masa_berlaku || (extracted.tgl_awal && extracted.tgl_akhir ? `${extracted.tgl_awal} s/d ${extracted.tgl_akhir}` : "-"),
+            teks_dokumen: extracted.teks_asli || "-",
+            kode_jenis: extracted.kode_jenis || "PB",
+            tgl_terbit: extracted.tgl_terbit || extracted.tgl_awal || "-",
+            tgl_awal: extracted.tgl_awal || "-",
+            tgl_akhir: extracted.tgl_akhir || "-",
+            durasi_hk: String(extracted.durasi_hk || calculateDays(extracted.masa_berlaku) || "-")
+          };
+
+          await fetch(`${API_URL}/api/documents`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          // Mark as done
+          setBatchFiles((prev) =>
+            prev.map((f, idx) =>
+              idx === i ? { ...f, status: "done", data: extracted } : f
+            )
+          );
+          successCount++;
+        } else {
+          throw new Error(result.detail || "Gagal mengekstrak dokumen");
+        }
+      } catch (err: any) {
+        errorCount++;
+        setBatchFiles((prev) =>
+          prev.map((f, idx) =>
+            idx === i ? { ...f, status: "error", errorMsg: err.message || "Gagal diproses" } : f
+          )
+        );
+      }
+
+      // Safe pause 1.2s between requests to prevent RPM/TPM rate limits
+      if (i < batchFiles.length - 1 && !stopBatchRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+    }
+
+    setIsBatchProcessing(false);
+    await fetchDocuments();
+
+    if (successCount > 0 && errorCount === 0) {
+      toast.success(`Semua ${successCount} dokumen batch berhasil diproses & disinkronkan ke Google Sheets! 🎉`);
+    } else if (successCount > 0 && errorCount > 0) {
+      toast.warning(`${successCount} dokumen berhasil, ${errorCount} dokumen gagal.`);
+    }
+  };
+
+  const handleStopBatch = () => {
+    stopBatchRef.current = true;
+    setIsBatchProcessing(false);
+  };
+
+  const handleRetryBatchItem = async (id: string) => {
+    const targetItem = batchFiles.find((f) => f.id === id);
+    if (!targetItem || isBatchProcessing) return;
+
+    setBatchFiles((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, status: "processing", errorMsg: undefined } : f))
+    );
+
+    try {
+      const formData = new FormData();
+      formData.append("file", targetItem.file);
+
+      const res = await fetch(`${API_URL}/api/extract`, {
+        method: "POST",
+        body: formData,
+      });
+      const result = await res.json();
+
+      if (res.ok && result.status === "success" && result.data) {
+        const extracted = result.data;
+        const payload = {
+          nama_klien: extracted.principal || "-",
+          jenis_dokumen: extracted.jenis_jaminan || "-",
+          nomor_identitas: extracted.nomor_jaminan || "-",
+          nilai_proyek: extracted.nilai_jaminan || "-",
+          obligee: extracted.obligee || "-",
+          pekerjaan: extracted.pekerjaan || "-",
+          masa_berlaku: extracted.masa_berlaku || (extracted.tgl_awal && extracted.tgl_akhir ? `${extracted.tgl_awal} s/d ${extracted.tgl_akhir}` : "-"),
+          teks_dokumen: extracted.teks_asli || "-",
+          kode_jenis: extracted.kode_jenis || "PB",
+          tgl_terbit: extracted.tgl_terbit || extracted.tgl_awal || "-",
+          tgl_awal: extracted.tgl_awal || "-",
+          tgl_akhir: extracted.tgl_akhir || "-",
+          durasi_hk: String(extracted.durasi_hk || calculateDays(extracted.masa_berlaku) || "-")
+        };
+
+        await fetch(`${API_URL}/api/documents`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        setBatchFiles((prev) =>
+          prev.map((f) => (f.id === id ? { ...f, status: "done", data: extracted } : f))
+        );
+        await fetchDocuments();
+        toast.success(`Dokumen ${targetItem.file.name} berhasil diproses ulang & disinkronkan! 🎉`);
+      } else {
+        throw new Error(result.detail || "Gagal diproses");
+      }
+    } catch (err: any) {
+      setBatchFiles((prev) =>
+        prev.map((f) => (f.id === id ? { ...f, status: "error", errorMsg: err.message } : f))
+      );
+      toast.error(`Coba lagi gagal: ${err.message}`);
     }
   };
 
@@ -659,358 +860,645 @@ export default function Home() {
           </div>
         </div>
       ) : (
-        <div className={extractedData ? "grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full" : "max-w-2xl mx-auto space-y-6 pt-4 pb-12"}>
-          
-          {/* KOLOM KIRI: Upload & Data Terstruktur (50% Split) */}
-          <div className={extractedData ? "lg:col-span-6 space-y-6" : ""}>
-            
-            {/* 1. Kotak Upload */}
-            <div className={`glass-panel rounded-3xl text-center border-dashed border-2 border-slate-600 hover:border-sky-500 transition-colors ${extractedData ? "p-6" : "p-10 sm:p-14"}`}>
-              <div className="w-12 h-12 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                <svg className="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+        <div className="space-y-6">
+          {/* Mode Switcher: Dokumen Tunggal vs Batch Multi-Dokumen */}
+          <div className="flex justify-center">
+            <div className="glass-panel p-1.5 rounded-2xl flex gap-2 border border-slate-700/70 shadow-xl shadow-black/30">
+              <button
+                type="button"
+                onClick={() => setUploadMode("single")}
+                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                  uploadMode === "single"
+                    ? "bg-sky-500 text-white shadow-md shadow-sky-500/30 ring-1 ring-sky-300"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                }`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span>Dokumen Tunggal</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setUploadMode("batch")}
+                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                  uploadMode === "batch"
+                    ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/30 ring-1 ring-emerald-300"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                }`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+                <span>Batch Multi-Dokumen</span>
+                <span className="bg-emerald-950 text-emerald-300 border border-emerald-400/40 text-[10px] font-black px-1.5 py-0.5 rounded-md">
+                  Auto-Sync
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* 1. VIEW MODE TUNGGAL */}
+          {uploadMode === "single" ? (
+            <div className={extractedData ? "grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full" : "max-w-2xl mx-auto space-y-6 pt-2 pb-12"}>
+              {/* KOLOM KIRI: Upload & Data Terstruktur (50% Split) */}
+              <div className={extractedData ? "lg:col-span-6 space-y-6" : ""}>
+                {/* Kotak Upload */}
+                <div className={`glass-panel rounded-3xl text-center border-dashed border-2 border-slate-600 hover:border-sky-500 transition-colors ${extractedData ? "p-6" : "p-10 sm:p-14"}`}>
+                  <div className="w-12 h-12 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                    <svg className="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                  </div>
+                  <h2 className="text-lg font-semibold mb-1">Upload Dokumen</h2>
+                  <p className="text-slate-400 mb-4 text-xs">Pilih file PDF, JPG, atau PNG.</p>
+                  
+                  <input type="file" onChange={handleFileChange} className="hidden" id="file-upload" />
+                  <label htmlFor="file-upload" className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-white px-6 py-2.5 rounded-full text-xs font-semibold transition-colors inline-block mb-2 border border-slate-600/60">
+                    {file ? file.name : "Browse Files"}
+                  </label>
+                  
+                  {file && (
+                    <div className="mt-3">
+                      <button 
+                        onClick={handleUpload} 
+                        disabled={isUploading}
+                        className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-2.5 rounded-full text-xs font-bold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50 cursor-pointer"
+                      >
+                        {isUploading ? "Memproses AI..." : "Ekstrak Sekarang"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Kotak Form Data Terstruktur */}
+                {extractedData && (
+                  <div className="glass-panel p-6 sm:p-7 rounded-3xl animate-in fade-in slide-in-from-left-8 duration-500 border border-slate-700/70 shadow-2xl">
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-700/60">
+                      <div className="flex items-center gap-3">
+                        <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.9)] shrink-0"></div>
+                        <div>
+                          <h2 className="text-lg font-bold text-white tracking-tight">Data Terstruktur</h2>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span className="text-[11px] text-emerald-400 font-medium">Terhubung Google Sheets</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={handleCopyExcel}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm cursor-pointer whitespace-nowrap ${
+                            isCopiedExcel 
+                              ? "bg-emerald-500/30 text-emerald-300 border-emerald-400 shadow-emerald-950/50 scale-105" 
+                              : "bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border-emerald-700/60 hover:border-emerald-500"
+                          }`}
+                          title="Salin 1 baris format tabel Excel"
+                        >
+                          {isCopiedExcel ? (
+                            <>
+                              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                              <span>Tersalin!</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                              <span>Salin Excel</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button 
+                          onClick={handleCopyText}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm cursor-pointer whitespace-nowrap ${
+                            isCopiedText 
+                              ? "bg-sky-500/30 text-sky-300 border-sky-400 shadow-sky-950/50 scale-105" 
+                              : "bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700 hover:border-slate-600"
+                          }`}
+                          title="Salin ringkasan teks"
+                        >
+                          {isCopiedText ? (
+                            <>
+                              <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                              <span>Tersalin!</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                              <span>Salin Teks</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-4 mb-6">
+                      {/* Row 1: Nomor Polis & Jenis Bond */}
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                        <div className="sm:col-span-5">
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">No. Polis / Jaminan</label>
+                          <input 
+                            type="text" 
+                            value={extractedData.nomor_jaminan || ""} 
+                            placeholder="Contoh: PP10051126000044" 
+                            onFocus={() => highlightInSource(extractedData.nomor_jaminan)} 
+                            onChange={(e) => setExtractedData({...extractedData, nomor_jaminan: e.target.value})} 
+                            className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
+                          />
+                        </div>
+                        <div className="sm:col-span-7">
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Jenis Bond</label>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                            {[
+                              { code: "PB", name: "PB", desc: "Pelaksanaan" },
+                              { code: "MB", name: "MB", desc: "Pemeliharaan" },
+                              { code: "APB", name: "APB", desc: "Uang Muka" },
+                              { code: "BB", name: "BB", desc: "Penawaran" }
+                            ].map((b) => {
+                              const isSelected = (extractedData.kode_jenis === b.code) || (!extractedData.kode_jenis && extractedData.jenis_jaminan?.toLowerCase().includes(b.desc.toLowerCase()));
+                              return (
+                                <button
+                                  key={b.code}
+                                  type="button"
+                                  onClick={() => setExtractedData({
+                                    ...extractedData, 
+                                    kode_jenis: b.code,
+                                    jenis_jaminan: `${b.code} - Jaminan ${b.desc}`
+                                  })}
+                                  className={`cursor-pointer px-2 py-1.5 rounded-xl text-center transition-all border ${
+                                    isSelected
+                                      ? "bg-sky-500 text-white border-sky-400 shadow-md shadow-sky-500/30 ring-1 ring-sky-300 scale-102 font-bold"
+                                      : "bg-slate-900/80 text-slate-300 border-slate-700/80 hover:bg-slate-800 hover:text-white hover:border-slate-600"
+                                  }`}
+                                >
+                                  <div className="text-xs font-black tracking-wide leading-none">{b.code}</div>
+                                  <div className="text-[9px] opacity-75 mt-0.5 truncate leading-none">{b.desc}</div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Row 2: Principal */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Principal (Pemohon / Terjamin)</label>
+                        <input 
+                          type="text" 
+                          value={extractedData.principal || ""} 
+                          onFocus={() => highlightInSource(extractedData.principal)} 
+                          onChange={(e) => setExtractedData({...extractedData, principal: e.target.value})} 
+                          className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
+                        />
+                      </div>
+
+                      {/* Row 3: Obligee */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Obligee (Penerima Jaminan / Pemilik Proyek / PPK)</label>
+                        <input 
+                          type="text" 
+                          value={extractedData.obligee || ""} 
+                          onFocus={() => highlightInSource(extractedData.obligee)} 
+                          onChange={(e) => setExtractedData({...extractedData, obligee: e.target.value})} 
+                          className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
+                        />
+                      </div>
+
+                      {/* Row 4: Nilai Bond & Tanggal Terbit */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Nilai Bond (Jaminan)</label>
+                          <input 
+                            type="text" 
+                            value={extractedData.nilai_jaminan || ""} 
+                            onFocus={() => highlightInSource(extractedData.nilai_jaminan)} 
+                            onChange={(e) => setExtractedData({...extractedData, nilai_jaminan: e.target.value})} 
+                            className="w-full glass-input rounded-xl px-3.5 py-2.5 font-bold text-emerald-400 text-sm" 
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Tanggal Terbit</label>
+                          <input 
+                            type="text" 
+                            value={extractedData.tgl_terbit || extractedData.tgl_awal || ""} 
+                            placeholder="DD/MM/YYYY" 
+                            onFocus={() => highlightInSource(extractedData.tgl_terbit)} 
+                            onChange={(e) => setExtractedData({...extractedData, tgl_terbit: e.target.value})} 
+                            className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
+                          />
+                        </div>
+                      </div>
+
+                      {/* Row 5: Jangka Waktu (Masa Berlaku) */}
+                      <div className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-700/60 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Jangka Waktu Jaminan</label>
+                          {(() => {
+                            const days = extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || (
+                              extractedData.tgl_awal && extractedData.tgl_akhir ? calculateDays(`${extractedData.tgl_awal} s/d ${extractedData.tgl_akhir}`) : null
+                            );
+                            if (days) {
+                              return (
+                                <span className="bg-sky-950 text-sky-300 border border-sky-500/40 text-[11px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1">
+                                  <svg className="w-3 h-3 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  {days} Hari Kerja (HK)
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2.5">
+                          <div>
+                            <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tgl Awal</span>
+                            <input 
+                              type="text" 
+                              placeholder="DD/MM/YYYY"
+                              value={extractedData.tgl_awal || ""} 
+                              onFocus={() => highlightInSource(extractedData.tgl_awal)} 
+                              onChange={(e) => setExtractedData({...extractedData, tgl_awal: e.target.value})} 
+                              className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center" 
+                            />
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tgl Akhir</span>
+                            <input 
+                              type="text" 
+                              placeholder="DD/MM/YYYY"
+                              value={extractedData.tgl_akhir || ""} 
+                              onFocus={() => highlightInSource(extractedData.tgl_akhir)} 
+                              onChange={(e) => setExtractedData({...extractedData, tgl_akhir: e.target.value})} 
+                              className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center" 
+                            />
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Hari (HK)</span>
+                            <input 
+                              type="text" 
+                              placeholder="Contoh: 120"
+                              value={extractedData.durasi_hk || ""} 
+                              onFocus={() => highlightInSource(extractedData.durasi_hk)} 
+                              onChange={(e) => setExtractedData({...extractedData, durasi_hk: e.target.value})} 
+                              className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center font-bold text-sky-400" 
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Row 6: Pekerjaan */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Nama Pekerjaan / Proyek</label>
+                        <textarea 
+                          rows={3} 
+                          value={extractedData.pekerjaan || ""} 
+                          onFocus={() => highlightInSource(extractedData.pekerjaan)} 
+                          onChange={(e) => setExtractedData({...extractedData, pekerjaan: e.target.value})} 
+                          className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm resize-none overflow-y-auto" 
+                        />
+                      </div>
+                    </div>
+
+                    {/* Bottom Buttons */}
+                    <div className="flex gap-3">
+                      <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-lg shadow-emerald-500/25 transition-all flex-1 cursor-pointer flex items-center justify-center gap-2">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                        </svg>
+                        Simpan ke Database & Google Sheets
+                      </button>
+                      {extractedData.id && (
+                        <button onClick={() => fetchAuditLogs(extractedData.id)} className="bg-slate-800 hover:bg-slate-700 text-sky-400 px-4 py-3 rounded-xl font-semibold text-xs border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          Riwayat
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-              <h2 className="text-lg font-semibold mb-1">Upload Dokumen</h2>
-              <p className="text-slate-400 mb-4 text-xs">Pilih file PDF, JPG, atau PNG.</p>
-              
-              <input type="file" onChange={handleFileChange} className="hidden" id="file-upload" />
-              <label htmlFor="file-upload" className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-white px-6 py-2.5 rounded-full text-xs font-semibold transition-colors inline-block mb-2 border border-slate-600/60">
-                {file ? file.name : "Browse Files"}
-              </label>
-              
-              {file && (
-                <div className="mt-3">
-                  <button 
-                    onClick={handleUpload} 
-                    disabled={isUploading}
-                    className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-2.5 rounded-full text-xs font-bold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50 cursor-pointer"
-                  >
-                    {isUploading ? "Memproses AI..." : "Ekstrak Sekarang"}
-                  </button>
+
+              {/* KOLOM KANAN (50%): Dokumen Asli OCR */}
+              {extractedData && (
+                <div className="lg:col-span-6">
+                  <div className="glass-panel rounded-3xl animate-in fade-in slide-in-from-right-8 duration-500 overflow-hidden bg-[#1e293b]/90 border border-slate-700/80 shadow-2xl flex flex-col h-full min-h-[700px]">
+                    {/* Header OCR */}
+                    <div className="bg-slate-900/90 px-6 py-4 border-b border-slate-700/80 flex justify-between items-center shrink-0">
+                      <div className="flex items-center gap-2">
+                        <svg className="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Dokumen Asli (OCR)</h2>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={handleCopyOcr}
+                          className={`text-xs px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 border cursor-pointer ${
+                            isCopiedOcr 
+                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50" 
+                              : "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600/70"
+                          }`}
+                        >
+                          {isCopiedOcr ? (
+                            <>
+                              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                              <span>Tersalin!</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                              <span>Salin Teks</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button 
+                          onClick={() => setIsEditMode(!isEditMode)}
+                          className="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-600/70 px-3 py-1.5 rounded-full transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                          {isEditMode ? "Mode Tampilan" : "Edit Teks"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Content OCR Body */}
+                    <div className="p-5 flex-1 flex flex-col">
+                      {isEditMode ? (
+                        <textarea 
+                          rows={30} 
+                          value={extractedData.teks_asli || ""} 
+                          onChange={(e) => setExtractedData({...extractedData, teks_asli: e.target.value})} 
+                          className="w-full flex-1 min-h-[600px] bg-[#0f172a]/70 text-slate-200 p-6 rounded-2xl font-sans text-sm sm:text-base leading-relaxed resize-none focus:outline-none focus:bg-[#0f172a]/90 transition-colors border border-slate-700/60 shadow-inner"
+                          placeholder="Teks dokumen akan muncul di sini..."
+                        />
+                      ) : (
+                        <div className="w-full flex-1 min-h-[600px] bg-[#0f172a]/70 text-slate-200 p-6 rounded-2xl font-sans text-sm sm:text-base leading-relaxed whitespace-pre-wrap border border-slate-700/60 shadow-inner overflow-y-auto">
+                          {renderHighlightedText(extractedData.teks_asli || "", highlightedWord)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-
-            {/* 2. Kotak Form Data Terstruktur (Muncul setelah ekstrak) */}
-            {extractedData && (
-              <div className="glass-panel p-6 sm:p-7 rounded-3xl animate-in fade-in slide-in-from-left-8 duration-500 border border-slate-700/70 shadow-2xl">
-                {/* Header Card with Clean Dual Copy Buttons */}
-                <div className="flex flex-wrap items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-700/60">
-                  <div className="flex items-center gap-3">
-                    <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.9)] shrink-0"></div>
-                    <div>
-                      <h2 className="text-lg font-bold text-white tracking-tight">Data Terstruktur</h2>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        <span className="text-[11px] text-emerald-400 font-medium">Terhubung Google Sheets</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    {/* Tombol Salin Format Excel */}
-                    <button 
-                      onClick={handleCopyExcel}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm cursor-pointer whitespace-nowrap ${
-                        isCopiedExcel 
-                          ? "bg-emerald-500/30 text-emerald-300 border-emerald-400 shadow-emerald-950/50 scale-105" 
-                          : "bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border-emerald-700/60 hover:border-emerald-500"
-                      }`}
-                      title="Salin 1 baris format tabel Excel (langsung paste ke file Excel)"
-                    >
-                      {isCopiedExcel ? (
-                        <>
-                          <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-                          </svg>
-                          <span>Tersalin!</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          <span>Salin Excel</span>
-                        </>
-                      )}
-                    </button>
-
-                    {/* Tombol Salin Rangkuman Teks */}
-                    <button 
-                      onClick={handleCopyText}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm cursor-pointer whitespace-nowrap ${
-                        isCopiedText 
-                          ? "bg-sky-500/30 text-sky-300 border-sky-400 shadow-sky-950/50 scale-105" 
-                          : "bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700 hover:border-slate-600"
-                      }`}
-                      title="Salin ringkasan teks untuk WhatsApp / Catatan"
-                    >
-                      {isCopiedText ? (
-                        <>
-                          <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-                          </svg>
-                          <span>Tersalin!</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                          </svg>
-                          <span>Salin Teks</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+          ) : (
+            /* 2. VIEW MODE BATCH MULTI-DOKUMEN */
+            <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
+              {/* Batch Dropzone */}
+              <div className="glass-panel rounded-3xl p-8 sm:p-10 text-center border-dashed border-2 border-slate-600 hover:border-emerald-500 transition-colors shadow-2xl">
+                <div className="w-16 h-16 mx-auto bg-emerald-950/60 rounded-full flex items-center justify-center mb-4 border border-emerald-500/30 shadow-lg shadow-emerald-950/40">
+                  <svg className="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
                 </div>
+                <h2 className="text-xl font-bold text-white mb-1">Unggah Banyak Dokumen (Batch)</h2>
+                <p className="text-slate-400 text-xs max-w-md mx-auto mb-5 leading-relaxed">
+                  Pilih hingga 20+ file PDF atau Gambar sekaligus. AI akan memproses dokumen secara berurutan dan otomatis menyimpannya ke Google Spreadsheet secara instan.
+                </p>
                 
-                <div className="space-y-4 mb-6">
-                  {/* Row 1: Nomor Polis & Jenis Bond */}
-                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
-                    <div className="sm:col-span-5">
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">No. Polis / Jaminan</label>
-                      <input 
-                        type="text" 
-                        value={extractedData.nomor_jaminan || ""} 
-                        placeholder="Contoh: PP10051126000044" 
-                        onFocus={() => highlightInSource(extractedData.nomor_jaminan)} 
-                        onChange={(e) => setExtractedData({...extractedData, nomor_jaminan: e.target.value})} 
-                        className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
-                      />
-                    </div>
-                    <div className="sm:col-span-7">
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Jenis Bond</label>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                        {[
-                          { code: "PB", name: "PB", desc: "Pelaksanaan" },
-                          { code: "MB", name: "MB", desc: "Pemeliharaan" },
-                          { code: "APB", name: "APB", desc: "Uang Muka" },
-                          { code: "BB", name: "BB", desc: "Penawaran" }
-                        ].map((b) => {
-                          const isSelected = (extractedData.kode_jenis === b.code) || (!extractedData.kode_jenis && extractedData.jenis_jaminan?.toLowerCase().includes(b.desc.toLowerCase()));
-                          return (
-                            <button
-                              key={b.code}
-                              type="button"
-                              onClick={() => setExtractedData({
-                                ...extractedData, 
-                                kode_jenis: b.code,
-                                jenis_jaminan: `${b.code} - Jaminan ${b.desc}`
-                              })}
-                              className={`cursor-pointer px-2 py-1.5 rounded-xl text-center transition-all border ${
-                                isSelected
-                                  ? "bg-sky-500 text-white border-sky-400 shadow-md shadow-sky-500/30 ring-1 ring-sky-300 scale-102 font-bold"
-                                  : "bg-slate-900/80 text-slate-300 border-slate-700/80 hover:bg-slate-800 hover:text-white hover:border-slate-600"
-                              }`}
-                            >
-                              <div className="text-xs font-black tracking-wide leading-none">{b.code}</div>
-                              <div className="text-[9px] opacity-75 mt-0.5 truncate leading-none">{b.desc}</div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Row 2: Principal */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Principal (Pemohon / Terjamin)</label>
-                    <input 
-                      type="text" 
-                      value={extractedData.principal || ""} 
-                      onFocus={() => highlightInSource(extractedData.principal)} 
-                      onChange={(e) => setExtractedData({...extractedData, principal: e.target.value})} 
-                      className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
-                    />
-                  </div>
-
-                  {/* Row 3: Obligee */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Obligee (Penerima Jaminan / Pemilik Proyek / PPK)</label>
-                    <input 
-                      type="text" 
-                      value={extractedData.obligee || ""} 
-                      onFocus={() => highlightInSource(extractedData.obligee)} 
-                      onChange={(e) => setExtractedData({...extractedData, obligee: e.target.value})} 
-                      className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
-                    />
-                  </div>
-
-                  {/* Row 4: Nilai Bond & Tanggal Terbit */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Nilai Bond (Jaminan)</label>
-                      <input 
-                        type="text" 
-                        value={extractedData.nilai_jaminan || ""} 
-                        onFocus={() => highlightInSource(extractedData.nilai_jaminan)} 
-                        onChange={(e) => setExtractedData({...extractedData, nilai_jaminan: e.target.value})} 
-                        className="w-full glass-input rounded-xl px-3.5 py-2.5 font-bold text-emerald-400 text-sm" 
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Tanggal Terbit</label>
-                      <input 
-                        type="text" 
-                        value={extractedData.tgl_terbit || extractedData.tgl_awal || ""} 
-                        placeholder="DD/MM/YYYY" 
-                        onFocus={() => highlightInSource(extractedData.tgl_terbit)} 
-                        onChange={(e) => setExtractedData({...extractedData, tgl_terbit: e.target.value})} 
-                        className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
-                      />
-                    </div>
-                  </div>
-
-                  {/* Row 5: Jangka Waktu (Masa Berlaku) */}
-                  <div className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-700/60 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Jangka Waktu Jaminan</label>
-                      {(() => {
-                        const days = extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || (
-                          extractedData.tgl_awal && extractedData.tgl_akhir ? calculateDays(`${extractedData.tgl_awal} s/d ${extractedData.tgl_akhir}`) : null
-                        );
-                        if (days) {
-                          return (
-                            <span className="bg-sky-950 text-sky-300 border border-sky-500/40 text-[11px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1">
-                              <svg className="w-3 h-3 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              {days} Hari Kerja (HK)
-                            </span>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tgl Awal</span>
-                        <input 
-                          type="text" 
-                          placeholder="DD/MM/YYYY"
-                          value={extractedData.tgl_awal || ""} 
-                          onFocus={() => highlightInSource(extractedData.tgl_awal)} 
-                          onChange={(e) => setExtractedData({...extractedData, tgl_awal: e.target.value})} 
-                          className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center" 
-                        />
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tgl Akhir</span>
-                        <input 
-                          type="text" 
-                          placeholder="DD/MM/YYYY"
-                          value={extractedData.tgl_akhir || ""} 
-                          onFocus={() => highlightInSource(extractedData.tgl_akhir)} 
-                          onChange={(e) => setExtractedData({...extractedData, tgl_akhir: e.target.value})} 
-                          className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center" 
-                        />
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Hari (HK)</span>
-                        <input 
-                          type="text" 
-                          placeholder="Contoh: 120"
-                          value={extractedData.durasi_hk || ""} 
-                          onFocus={() => highlightInSource(extractedData.durasi_hk)} 
-                          onChange={(e) => setExtractedData({...extractedData, durasi_hk: e.target.value})} 
-                          className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center font-bold text-sky-400" 
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Row 6: Pekerjaan */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Nama Pekerjaan / Proyek</label>
-                    <textarea 
-                      rows={3} 
-                      value={extractedData.pekerjaan || ""} 
-                      onFocus={() => highlightInSource(extractedData.pekerjaan)} 
-                      onChange={(e) => setExtractedData({...extractedData, pekerjaan: e.target.value})} 
-                      className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm resize-none overflow-y-auto" 
-                    />
-                  </div>
-                </div>
-
-                {/* Bottom Buttons */}
-                <div className="flex gap-3">
-                  <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-lg shadow-emerald-500/25 transition-all flex-1 cursor-pointer flex items-center justify-center gap-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                    </svg>
-                    Simpan ke Database & Google Sheets
-                  </button>
-                  {extractedData.id && (
-                    <button onClick={() => fetchAuditLogs(extractedData.id)} className="bg-slate-800 hover:bg-slate-700 text-sky-400 px-4 py-3 rounded-xl font-semibold text-xs border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      Riwayat
-                    </button>
-                  )}
-                </div>
+                <input 
+                  type="file" 
+                  multiple 
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={handleBatchFilesSelect} 
+                  className="hidden" 
+                  id="batch-file-upload" 
+                />
+                <label 
+                  htmlFor="batch-file-upload" 
+                  className="cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-8 py-3 rounded-full text-xs font-bold shadow-lg shadow-emerald-600/25 transition-all inline-flex items-center gap-2 border border-emerald-400/40"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                  </svg>
+                  Pilih Banyak File Sekaligus
+                </label>
               </div>
-            )}
-          </div>
 
-          {/* KOLOM KANAN (50%): Dokumen Asli OCR */}
-          {extractedData && (
-            <div className="lg:col-span-6">
-              <div className="glass-panel rounded-3xl animate-in fade-in slide-in-from-right-8 duration-500 overflow-hidden bg-[#1e293b]/90 border border-slate-700/80 shadow-2xl flex flex-col h-full min-h-[700px]">
-                {/* Header OCR */}
-                <div className="bg-slate-900/90 px-6 py-4 border-b border-slate-700/80 flex justify-between items-center shrink-0">
-                  <div className="flex items-center gap-2">
-                    <svg className="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                    <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Dokumen Asli (OCR)</h2>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={handleCopyOcr}
-                      className={`text-xs px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 border cursor-pointer ${
-                        isCopiedOcr 
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50" 
-                          : "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600/70"
-                      }`}
-                    >
-                      {isCopiedOcr ? (
-                        <>
-                          <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
-                          <span>Tersalin!</span>
-                        </>
+              {/* Batch Queue List & Progress Controller */}
+              {batchFiles.length > 0 && (
+                <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-slate-700/80 shadow-2xl space-y-6">
+                  {/* Header Controller */}
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-5 border-b border-slate-700/60">
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <h3 className="text-lg font-bold text-white tracking-tight">Antrian Pemrosesan Batch</h3>
+                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                          {batchFiles.length} File
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs">
+                        <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                          {batchFiles.filter(f => f.status === "done").length} Selesai
+                        </span>
+                        <span className="text-sky-400 font-semibold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+                          {batchFiles.filter(f => f.status === "processing").length} Diproses
+                        </span>
+                        <span className="text-slate-400 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                          {batchFiles.filter(f => f.status === "pending").length} Menunggu
+                        </span>
+                        {batchFiles.some(f => f.status === "error") && (
+                          <span className="text-red-400 font-semibold flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                            {batchFiles.filter(f => f.status === "error").length} Gagal
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Batch Action Buttons */}
+                    <div className="flex items-center gap-2 self-stretch sm:self-auto">
+                      {isBatchProcessing ? (
+                        <button
+                          onClick={handleStopBatch}
+                          className="bg-red-600 hover:bg-red-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-red-600/30 flex items-center justify-center gap-2 cursor-pointer w-full sm:w-auto"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                          </svg>
+                          <span>Hentikan Antrian</span>
+                        </button>
                       ) : (
-                        <>
-                          <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                          <span>Salin Teks</span>
-                        </>
+                        <button
+                          onClick={startBatchProcessing}
+                          disabled={batchFiles.every(f => f.status === "done")}
+                          className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed w-full sm:w-auto"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span>Mulai Proses Antrian ({batchFiles.filter(f => f.status !== "done").length})</span>
+                        </button>
                       )}
-                    </button>
 
-                    <button 
-                      onClick={() => setIsEditMode(!isEditMode)}
-                      className="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-600/70 px-3 py-1.5 rounded-full transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-                    >
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-                      {isEditMode ? "Mode Tampilan" : "Edit Teks"}
-                    </button>
+                      {!isBatchProcessing && (
+                        <button
+                          onClick={handleClearBatch}
+                          className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3.5 py-2.5 rounded-xl text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
+                          title="Bersihkan Semua Antrian"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  {(() => {
+                    const doneCount = batchFiles.filter(f => f.status === "done").length;
+                    const percent = Math.round((doneCount / batchFiles.length) * 100);
+                    const activeItem = batchFiles.find(f => f.status === "processing");
+                    return (
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs font-semibold">
+                          <span className="text-slate-300">
+                            {isBatchProcessing && activeItem ? (
+                              <span className="text-sky-400 flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping"></span>
+                                Memproses: {activeItem.file.name}
+                              </span>
+                            ) : doneCount === batchFiles.length ? (
+                              <span className="text-emerald-400 font-bold">Semua Dokumen Selesai Diproses! 🎉</span>
+                            ) : (
+                              <span>Progress Antrian</span>
+                            )}
+                          </span>
+                          <span className="text-slate-400 font-mono">{percent}% ({doneCount}/{batchFiles.length})</span>
+                        </div>
+                        <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-700/60 p-0.5">
+                          <div 
+                            className="bg-gradient-to-r from-sky-500 via-teal-500 to-emerald-500 h-full rounded-full transition-all duration-500 ease-out" 
+                            style={{ width: `${percent}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* File Queue List */}
+                  <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+                    {batchFiles.map((item, idx) => (
+                      <div 
+                        key={item.id}
+                        className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+                          item.status === "processing"
+                            ? "bg-sky-950/40 border-sky-500/50 shadow-lg shadow-sky-950/40 ring-1 ring-sky-400/30"
+                            : item.status === "done"
+                            ? "bg-emerald-950/20 border-emerald-700/40 hover:border-emerald-500/50"
+                            : item.status === "error"
+                            ? "bg-red-950/20 border-red-700/40"
+                            : "bg-slate-900/60 border-slate-800 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                            item.status === "processing" ? "bg-sky-900/60 text-sky-400" :
+                            item.status === "done" ? "bg-emerald-900/60 text-emerald-400" :
+                            item.status === "error" ? "bg-red-900/60 text-red-400" :
+                            "bg-slate-800 text-slate-400"
+                          }`}>
+                            {item.status === "processing" ? (
+                              <svg className="w-5 h-5 animate-spin text-sky-400" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                              </svg>
+                            ) : item.status === "done" ? (
+                              <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                              </svg>
+                            ) : item.status === "error" ? (
+                              <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            ) : (
+                              <span className="text-xs font-mono font-bold">{idx + 1}</span>
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-white truncate">{item.file.name}</span>
+                              <span className="text-[10px] text-slate-500 font-mono shrink-0">
+                                ({(item.file.size / 1024 / 1024).toFixed(2)} MB)
+                              </span>
+                            </div>
+
+                            {/* Detail summary on done */}
+                            {item.status === "done" && item.data && (
+                              <div className="flex flex-wrap items-center gap-2 mt-1 text-xs">
+                                <span className="px-2 py-0.5 rounded-md bg-sky-950 text-sky-300 font-mono font-bold text-[10px] border border-sky-700/50">
+                                  {item.data.kode_jenis || "PB"}
+                                </span>
+                                <span className="text-slate-300 font-medium truncate max-w-[200px]">
+                                  {item.data.principal || "-"}
+                                </span>
+                                <span className="text-emerald-400 font-semibold">
+                                  {item.data.nilai_jaminan || "-"}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Error message on error */}
+                            {item.status === "error" && (
+                              <p className="text-xs text-red-400 mt-0.5">{item.errorMsg || "Gagal diproses"}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Item Actions */}
+                        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                          {item.status === "done" && (
+                            <button
+                              onClick={() => handleInspectBatchItem(item)}
+                              className="bg-sky-900/50 hover:bg-sky-500 text-sky-300 hover:text-white px-3 py-1 rounded-xl text-xs font-semibold transition-all border border-sky-500/30 cursor-pointer flex items-center gap-1"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                              <span>Lihat Detail</span>
+                            </button>
+                          )}
+
+                          {item.status === "error" && (
+                            <button
+                              onClick={() => handleRetryBatchItem(item.id)}
+                              disabled={isBatchProcessing}
+                              className="bg-amber-900/50 hover:bg-amber-600 text-amber-300 hover:text-white px-3 py-1 rounded-xl text-xs font-semibold transition-all border border-amber-500/30 cursor-pointer flex items-center gap-1"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                              <span>Coba Lagi</span>
+                            </button>
+                          )}
+
+                          {!isBatchProcessing && item.status !== "processing" && (
+                            <button
+                              onClick={() => handleRemoveBatchItem(item.id)}
+                              className="text-slate-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
+                              title="Hapus dari antrian"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-
-                {/* Content OCR Body */}
-                <div className="p-5 flex-1 flex flex-col">
-                  {isEditMode ? (
-                    <textarea 
-                      rows={30} 
-                      value={extractedData.teks_asli || ""} 
-                      onChange={(e) => setExtractedData({...extractedData, teks_asli: e.target.value})} 
-                      className="w-full flex-1 min-h-[600px] bg-[#0f172a]/70 text-slate-200 p-6 rounded-2xl font-sans text-sm sm:text-base leading-relaxed resize-none focus:outline-none focus:bg-[#0f172a]/90 transition-colors border border-slate-700/60 shadow-inner"
-                      placeholder="Teks dokumen akan muncul di sini..."
-                    />
-                  ) : (
-                    <div className="w-full flex-1 min-h-[600px] bg-[#0f172a]/70 text-slate-200 p-6 rounded-2xl font-sans text-sm sm:text-base leading-relaxed whitespace-pre-wrap border border-slate-700/60 shadow-inner overflow-y-auto">
-                      {renderHighlightedText(extractedData.teks_asli || "", highlightedWord)}
-                    </div>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
           )}
         </div>
