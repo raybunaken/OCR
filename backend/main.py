@@ -347,17 +347,54 @@ async def extract_document(file: UploadFile = File(...)):
                 teks_digital += page.get_text().strip() + "\n"
                 
             if len(teks_digital.strip()) > 50:
-                # Digital PDF (bisa di-select teksnya)
+                # Digital PDF (bisa di-select teksnya) - mencakup seluruh halaman
                 data_ekstrak = rapikan_teks(teks_digital)
                 return {"status": "success", "data": data_ekstrak}
             else:
-                # PDF Scan (hanya berisi gambar) -> Render halaman 1 ke gambar
-                page = doc[0]
-                pix = page.get_pixmap(dpi=150)
-                img_bytes = pix.tobytes("jpeg")
-                b64_image = encode_image_bytes(img_bytes)
-                data_ekstrak = extract_from_image_vision(b64_image)
-                return {"status": "success", "data": data_ekstrak}
+                # PDF Scan (berisi gambar scan) -> Render dan OCR tiap halaman (hingga 5 lembar)
+                combined_ocr_text = ""
+                total_pages = min(len(doc), 5)
+                for page_idx in range(total_pages):
+                    page = doc[page_idx]
+                    pix = page.get_pixmap(dpi=150)
+                    img_bytes = pix.tobytes("jpeg")
+                    b64_image = encode_image_bytes(img_bytes)
+                    
+                    try:
+                        ocr_prompt = "Lakukan OCR pada gambar dokumen Surety Bond ini. Transkripsikan semua teks yang terlihat pada gambar secara lengkap, jelas, dan akurat."
+                        chat = call_groq_api(
+                            messages=[
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "text", "text": ocr_prompt},
+                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}}
+                                    ]
+                                }
+                            ],
+                            model="qwen/qwen3.6-27b",
+                            temperature=0.1,
+                            max_tokens=3000
+                        )
+                        raw_content = chat.choices[0].message.content
+                        clean_text = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
+                        if not clean_text:
+                            clean_text = raw_content.replace("<think>", "").replace("</think>", "").strip()
+                        if clean_text:
+                            combined_ocr_text += f"\n--- Halaman {page_idx + 1} ---\n" + clean_text
+                    except Exception as ocr_err:
+                        print(f"Error OCR Halaman {page_idx + 1}:", ocr_err)
+                
+                if combined_ocr_text.strip():
+                    data_ekstrak = rapikan_teks(combined_ocr_text)
+                    return {"status": "success", "data": data_ekstrak}
+                else:
+                    return {"status": "success", "data": {
+                        "kode_jenis": "PB", "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
+                        "principal": "-", "obligee": "-", "pekerjaan": "-", 
+                        "tgl_terbit": "-", "tgl_awal": "-", "tgl_akhir": "-", "durasi_hk": "-",
+                        "masa_berlaku": "-", "teks_asli": "Tidak ada teks yang berhasil diekstrak."
+                    }}
                 
         elif file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
             # Langsung kirim ke Groq Vision
