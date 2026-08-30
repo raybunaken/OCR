@@ -12,7 +12,8 @@ export default function Home() {
   const [documents, setDocuments] = useState<any[]>([]);
   const [deleteModalData, setDeleteModalData] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
+  const [isCopiedExcel, setIsCopiedExcel] = useState(false);
+  const [isCopiedText, setIsCopiedText] = useState(false);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [highlightedWord, setHighlightedWord] = useState("");
@@ -201,8 +202,13 @@ export default function Home() {
       nilai_proyek: extractedData.nilai_jaminan || "-",
       obligee: extractedData.obligee || "-",
       pekerjaan: extractedData.pekerjaan || "-",
-      masa_berlaku: extractedData.masa_berlaku || "-",
-      teks_dokumen: extractedData.teks_asli || "-"
+      masa_berlaku: extractedData.masa_berlaku || (extractedData.tgl_awal && extractedData.tgl_akhir ? `${extractedData.tgl_awal} s/d ${extractedData.tgl_akhir}` : "-"),
+      teks_dokumen: extractedData.teks_asli || "-",
+      kode_jenis: extractedData.kode_jenis || "PB",
+      tgl_terbit: extractedData.tgl_terbit || extractedData.tgl_awal || "-",
+      tgl_awal: extractedData.tgl_awal || "-",
+      tgl_akhir: extractedData.tgl_akhir || "-",
+      durasi_hk: String(extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || "-")
     };
 
     try {
@@ -213,7 +219,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        toast.success("Dokumen berhasil diperbarui!");
+        toast.success("Dokumen berhasil diperbarui & disinkronkan!");
       } else {
         // Mode Simpan Baru
         await fetch(`${API_URL}/api/documents`, {
@@ -221,11 +227,12 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        toast.success("Data berhasil disimpan secara permanen!");
+        toast.success("Data berhasil disimpan & disinkronkan ke Google Sheets!");
       }
       
       setExtractedData(null);
       setFile(null);
+      await fetchDocuments();
       setActiveTab("dashboard");
     } catch (err) {
       toast.error("Gagal menyimpan ke database.");
@@ -318,24 +325,53 @@ export default function Home() {
     }
   };
 
-  const handleCopyAll = () => {
+  const handleCopyExcel = () => {
     if (!extractedData) return;
-    const days = calculateDays(extractedData.masa_berlaku);
-    const durationText = days !== null ? ` (${days} Hari)` : "";
+    const noPolis = extractedData.nomor_jaminan && extractedData.nomor_jaminan !== "-" ? extractedData.nomor_jaminan : "";
+    const jenisBond = extractedData.kode_jenis || (
+      extractedData.jenis_jaminan?.toLowerCase().includes("pemeliharaan") ? "MB" :
+      extractedData.jenis_jaminan?.toLowerCase().includes("pelaksanaan") ? "PB" :
+      extractedData.jenis_jaminan?.toLowerCase().includes("uang muka") ? "APB" :
+      extractedData.jenis_jaminan?.toLowerCase().includes("penawaran") ? "BB" : "PB"
+    );
+    const principal = extractedData.principal || "";
+    const obligee = extractedData.obligee || "";
+    const pekerjaan = extractedData.pekerjaan || "";
+    const nilaiBond = extractedData.nilai_jaminan || "";
+    const tglTerbit = extractedData.tgl_terbit || extractedData.tgl_awal || "";
+    const tglAwal = extractedData.tgl_awal || "";
+    const tglAkhir = extractedData.tgl_akhir || "";
+    const durasiHK = extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || "";
+
+    // Tab-separated values: NO. POLIS | JENIS BOND | PRINCIPAL | OBLIGEE | PEKERJAAN | NILAI BOND | TGL TERBIT | TGL AWAL | TGL AKHIR | HK
+    const rowTsv = [noPolis, jenisBond, principal, obligee, pekerjaan, nilaiBond, tglTerbit, tglAwal, tglAkhir, durasiHK].join("\t");
+
+    navigator.clipboard.writeText(rowTsv);
+    setIsCopiedExcel(true);
+    toast.success("Format baris Excel disalin! Siap paste (Ctrl+V) langsung ke Excel.");
+    setTimeout(() => setIsCopiedExcel(false), 2500);
+  };
+
+  const handleCopyText = () => {
+    if (!extractedData) return;
+    const days = extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku);
+    const durationText = days ? ` (${days} Hari)` : "";
 
     const textToCopy = [
+      `No. Polis     : ${extractedData.nomor_jaminan || "-"}`,
+      `Jenis Bond    : ${extractedData.kode_jenis || "PB"} - ${extractedData.jenis_jaminan || "-"}`,
       `Principal     : ${extractedData.principal || "-"}`,
       `Obligee       : ${extractedData.obligee || "-"}`,
-      `Jenis Jaminan : ${extractedData.jenis_jaminan || "-"}`,
-      `Nilai Jaminan : ${extractedData.nilai_jaminan || "-"}`,
-      `Masa Berlaku  : ${extractedData.masa_berlaku || "-"}${durationText}`,
-      `Pekerjaan     : ${extractedData.pekerjaan || "-"}`
+      `Nilai Bond    : ${extractedData.nilai_jaminan || "-"}`,
+      `Pekerjaan     : ${extractedData.pekerjaan || "-"}`,
+      `Tgl Terbit    : ${extractedData.tgl_terbit || "-"}`,
+      `Jangka Waktu  : ${extractedData.tgl_awal || "-"} s/d ${extractedData.tgl_akhir || "-"}${durationText}`
     ].join("\n");
 
     navigator.clipboard.writeText(textToCopy);
-    setIsCopied(true);
-    toast.success("Semua data terstruktur berhasil disalin!");
-    setTimeout(() => setIsCopied(false), 2500);
+    setIsCopiedText(true);
+    toast.success("Rangkuman teks berhasil disalin ke clipboard!");
+    setTimeout(() => setIsCopiedText(false), 2500);
   };
 
 
@@ -568,11 +604,16 @@ export default function Home() {
                                 id: doc.id,
                                 principal: doc.nama_klien,
                                 jenis_jaminan: doc.jenis_dokumen,
+                                kode_jenis: doc.kode_jenis || (doc.jenis_dokumen?.toLowerCase().includes("pemeliharaan") ? "MB" : doc.jenis_dokumen?.toLowerCase().includes("uang muka") ? "APB" : doc.jenis_dokumen?.toLowerCase().includes("penawaran") ? "BB" : "PB"),
                                 nomor_jaminan: doc.nomor_identitas,
                                 nilai_jaminan: doc.nilai_proyek,
                                 obligee: doc.obligee,
                                 pekerjaan: doc.pekerjaan,
                                 masa_berlaku: doc.masa_berlaku,
+                                tgl_terbit: doc.tgl_terbit || "",
+                                tgl_awal: doc.tgl_awal || "",
+                                tgl_akhir: doc.tgl_akhir || "",
+                                durasi_hk: doc.durasi_hk || "",
                                 teks_asli: doc.teks_dokumen
                               });
                               setActiveTab("upload");
@@ -631,96 +672,252 @@ export default function Home() {
             {/* 2. Kotak Form Data (Muncul setelah ekstrak) */}
             {extractedData && (
               <div className="glass-panel p-8 rounded-3xl animate-in fade-in slide-in-from-left-8 duration-500">
-                <div className="flex items-center justify-between gap-3 mb-6 border-b border-slate-700/50 pb-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 border-b border-slate-700/50 pb-4">
                   <div className="flex items-center gap-3">
                     <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]"></div>
-                    <h2 className="text-lg font-semibold text-slate-200 tracking-wide">Data Terstruktur</h2>
+                    <div>
+                      <h2 className="text-lg font-semibold text-slate-200 tracking-wide">Data Terstruktur</h2>
+                      <p className="text-xs text-emerald-400/90 flex items-center gap-1.5 mt-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Terintegrasi Standar Register Excel & Google Sheets
+                      </p>
+                    </div>
                   </div>
                   
-                  <button 
-                    onClick={handleCopyAll}
-                    className={`cursor-pointer px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 border shadow-sm ${
-                      isCopied 
-                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-emerald-950/40" 
-                        : "bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border-slate-700/80 hover:border-slate-600 shadow-black/20"
-                    }`}
-                    title="Salin seluruh data terstruktur ke clipboard"
-                  >
-                    {isCopied ? (
-                      <>
-                        <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-                        </svg>
-                        <span>Tersalin!</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                        <span>Salin Semua</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    {/* Tombol Salin Format Excel */}
+                    <button 
+                      onClick={handleCopyExcel}
+                      className={`cursor-pointer px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border shadow-sm ${
+                        isCopiedExcel 
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-emerald-950/40" 
+                          : "bg-emerald-950/50 hover:bg-emerald-900/60 text-emerald-300 border-emerald-700/50 shadow-black/20"
+                      }`}
+                      title="Salin 1 baris format tabel Excel (langsung paste ke file Excel)"
+                    >
+                      {isCopiedExcel ? (
+                        <>
+                          <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                          <span>Tersalin ke Excel!</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          <span>Salin Format Excel</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Tombol Salin Rangkuman Teks */}
+                    <button 
+                      onClick={handleCopyText}
+                      className={`cursor-pointer px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border shadow-sm ${
+                        isCopiedText 
+                          ? "bg-sky-500/20 text-sky-300 border-sky-500/50 shadow-sky-950/40" 
+                          : "bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border-slate-700/80 hover:border-slate-600 shadow-black/20"
+                      }`}
+                      title="Salin format teks ringkas untuk WhatsApp atau Catatan"
+                    >
+                      {isCopiedText ? (
+                        <>
+                          <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                          <span>Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          <span>Salin Teks</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="space-y-5 mb-8">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Principal</label>
-                    <input type="text" value={extractedData.principal || ""} onFocus={() => highlightInSource(extractedData.principal)} onChange={(e) => setExtractedData({...extractedData, principal: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Obligee</label>
-                    <input type="text" value={extractedData.obligee || ""} onFocus={() => highlightInSource(extractedData.obligee)} onChange={(e) => setExtractedData({...extractedData, obligee: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Jenis Jaminan</label>
-                      <input type="text" value={extractedData.jenis_jaminan || ""} onFocus={() => highlightInSource(extractedData.jenis_jaminan)} onChange={(e) => setExtractedData({...extractedData, jenis_jaminan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Nilai Jaminan</label>
-                      <input type="text" value={extractedData.nilai_jaminan || ""} onFocus={() => highlightInSource(extractedData.nilai_jaminan)} onChange={(e) => setExtractedData({...extractedData, nilai_jaminan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Masa Berlaku</label>
-                    <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                  {/* Row 1: Nomor Polis & Jenis Bond */}
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                    <div className="sm:col-span-5">
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">No. Polis / Jaminan</label>
                       <input 
                         type="text" 
-                        value={extractedData.masa_berlaku || ""} 
-                        onFocus={() => highlightInSource(extractedData.masa_berlaku)} 
-                        onChange={(e) => setExtractedData({...extractedData, masa_berlaku: e.target.value})} 
+                        value={extractedData.nomor_jaminan || ""} 
+                        placeholder="Contoh: PP10051126000044" 
+                        onFocus={() => highlightInSource(extractedData.nomor_jaminan)} 
+                        onChange={(e) => setExtractedData({...extractedData, nomor_jaminan: e.target.value})} 
                         className="w-full glass-input rounded-xl px-4 py-3" 
                       />
-                      {(() => {
-                        const days = calculateDays(extractedData.masa_berlaku);
-                        if (days !== null) {
+                    </div>
+                    <div className="sm:col-span-7">
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Jenis Bond (PB / MB / APB / BB)</label>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {[
+                          { code: "PB", label: "PB (Pelaksanaan)" },
+                          { code: "MB", label: "MB (Pemeliharaan)" },
+                          { code: "APB", label: "APB (Uang Muka)" },
+                          { code: "BB", label: "BB (Penawaran)" }
+                        ].map((b) => {
+                          const isSelected = (extractedData.kode_jenis === b.code) || (!extractedData.kode_jenis && extractedData.jenis_jaminan?.toLowerCase().includes(b.label.toLowerCase().split("(")[1]?.replace(")", "")));
                           return (
-                            <div className="bg-sky-950/70 border border-sky-500/40 text-sky-300 font-semibold px-4 py-3 rounded-xl whitespace-nowrap flex items-center gap-2 shadow-md shadow-sky-950/50 animate-in zoom-in-95 duration-200">
-                              <svg className="w-4 h-4 text-sky-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <button
+                              key={b.code}
+                              type="button"
+                              onClick={() => setExtractedData({
+                                ...extractedData, 
+                                kode_jenis: b.code,
+                                jenis_jaminan: b.code === "PB" ? "PB - Jaminan Pelaksanaan" : b.code === "MB" ? "MB - Jaminan Pemeliharaan" : b.code === "APB" ? "APB - Jaminan Uang Muka" : "BB - Jaminan Penawaran"
+                              })}
+                              className={`cursor-pointer px-3 py-2 rounded-xl text-xs font-bold transition-all border ${
+                                isSelected
+                                  ? "bg-sky-500 text-white border-sky-400 shadow-md shadow-sky-500/30 scale-105"
+                                  : "bg-slate-900/80 text-slate-400 border-slate-700/80 hover:text-slate-200 hover:border-slate-600"
+                              }`}
+                            >
+                              {b.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Principal */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Principal (Pemohon / Terjamin)</label>
+                    <input 
+                      type="text" 
+                      value={extractedData.principal || ""} 
+                      onFocus={() => highlightInSource(extractedData.principal)} 
+                      onChange={(e) => setExtractedData({...extractedData, principal: e.target.value})} 
+                      className="w-full glass-input rounded-xl px-4 py-3" 
+                    />
+                  </div>
+
+                  {/* Row 3: Obligee */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Obligee (Penerima Jaminan / Pemilik Proyek / PPK)</label>
+                    <input 
+                      type="text" 
+                      value={extractedData.obligee || ""} 
+                      onFocus={() => highlightInSource(extractedData.obligee)} 
+                      onChange={(e) => setExtractedData({...extractedData, obligee: e.target.value})} 
+                      className="w-full glass-input rounded-xl px-4 py-3" 
+                    />
+                  </div>
+
+                  {/* Row 4: Nilai Bond & Tanggal Terbit */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Nilai Bond (Jaminan)</label>
+                      <input 
+                        type="text" 
+                        value={extractedData.nilai_jaminan || ""} 
+                        onFocus={() => highlightInSource(extractedData.nilai_jaminan)} 
+                        onChange={(e) => setExtractedData({...extractedData, nilai_jaminan: e.target.value})} 
+                        className="w-full glass-input rounded-xl px-4 py-3 font-semibold text-emerald-400" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Tanggal Terbit</label>
+                      <input 
+                        type="text" 
+                        value={extractedData.tgl_terbit || extractedData.tgl_awal || ""} 
+                        placeholder="DD/MM/YYYY" 
+                        onFocus={() => highlightInSource(extractedData.tgl_terbit)} 
+                        onChange={(e) => setExtractedData({...extractedData, tgl_terbit: e.target.value})} 
+                        className="w-full glass-input rounded-xl px-4 py-3" 
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 5: Jangka Waktu (Masa Berlaku) */}
+                  <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700/60 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Jangka Waktu Jaminan (Masa Berlaku)</label>
+                      {(() => {
+                        const days = extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || (
+                          extractedData.tgl_awal && extractedData.tgl_akhir ? calculateDays(`${extractedData.tgl_awal} s/d ${extractedData.tgl_akhir}`) : null
+                        );
+                        if (days) {
+                          return (
+                            <span className="bg-sky-950 text-sky-300 border border-sky-500/40 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                              <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                               </svg>
-                              <span>{days} Hari</span>
-                            </div>
+                              {days} Hari Kerja (HK)
+                            </span>
                           );
                         }
                         return null;
                       })()}
                     </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tanggal Awal</span>
+                        <input 
+                          type="text" 
+                          placeholder="DD/MM/YYYY"
+                          value={extractedData.tgl_awal || ""} 
+                          onFocus={() => highlightInSource(extractedData.tgl_awal)} 
+                          onChange={(e) => setExtractedData({...extractedData, tgl_awal: e.target.value})} 
+                          className="w-full glass-input rounded-xl px-3 py-2 text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tanggal Akhir</span>
+                        <input 
+                          type="text" 
+                          placeholder="DD/MM/YYYY"
+                          value={extractedData.tgl_akhir || ""} 
+                          onFocus={() => highlightInSource(extractedData.tgl_akhir)} 
+                          onChange={(e) => setExtractedData({...extractedData, tgl_akhir: e.target.value})} 
+                          className="w-full glass-input rounded-xl px-3 py-2 text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Jumlah Hari (HK)</span>
+                        <input 
+                          type="text" 
+                          placeholder="Contoh: 180"
+                          value={extractedData.durasi_hk || ""} 
+                          onFocus={() => highlightInSource(extractedData.durasi_hk)} 
+                          onChange={(e) => setExtractedData({...extractedData, durasi_hk: e.target.value})} 
+                          className="w-full glass-input rounded-xl px-3 py-2 text-sm font-bold text-sky-400" 
+                        />
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Row 6: Pekerjaan */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Pekerjaan</label>
-                    <textarea rows={3} value={extractedData.pekerjaan || ""} onFocus={() => highlightInSource(extractedData.pekerjaan)} onChange={(e) => setExtractedData({...extractedData, pekerjaan: e.target.value})} className="w-full glass-input rounded-xl px-4 py-3 resize-none overflow-y-auto" />
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Nama Pekerjaan / Proyek</label>
+                    <textarea 
+                      rows={3} 
+                      value={extractedData.pekerjaan || ""} 
+                      onFocus={() => highlightInSource(extractedData.pekerjaan)} 
+                      onChange={(e) => setExtractedData({...extractedData, pekerjaan: e.target.value})} 
+                      className="w-full glass-input rounded-xl px-4 py-3 resize-none overflow-y-auto" 
+                    />
                   </div>
                 </div>
 
                 <div className="flex gap-4">
-                  <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-emerald-500/25 transition-all flex-1">
-                    Simpan ke Database Permanen
+                  <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3.5 rounded-xl font-semibold shadow-lg shadow-emerald-500/25 transition-all flex-1 cursor-pointer flex items-center justify-center gap-2">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                    </svg>
+                    Simpan ke Database & Google Sheets
                   </button>
                   {extractedData.id && (
-                    <button onClick={() => fetchAuditLogs(extractedData.id)} className="bg-slate-800 hover:bg-slate-700 text-sky-400 px-6 py-3 rounded-xl font-semibold border border-slate-700 transition-all flex items-center gap-2">
+                    <button onClick={() => fetchAuditLogs(extractedData.id)} className="bg-slate-800 hover:bg-slate-700 text-sky-400 px-6 py-3.5 rounded-xl font-semibold border border-slate-700 transition-all flex items-center gap-2 cursor-pointer">
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       Riwayat Edit
                     </button>

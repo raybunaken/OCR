@@ -7,6 +7,8 @@ import fitz
 import datetime
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
+import urllib.request
 from pydantic import BaseModel
 import psycopg2
 import psycopg2.extras
@@ -64,6 +66,13 @@ def init_db():
         )
     """)
     
+    # Auto-migration: pastikan kolom-kolom register baru tersedia
+    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS kode_jenis TEXT;")
+    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_terbit TEXT;")
+    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_awal TEXT;")
+    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_akhir TEXT;")
+    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS durasi_hk TEXT;")
+    
     # Buat tabel audit_logs jika belum ada
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS audit_logs (
@@ -75,6 +84,22 @@ def init_db():
     """)
     conn.commit()
     conn.close()
+
+def sync_to_google_sheets(payload):
+    webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL")
+    if not webhook_url:
+        return
+    try:
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            webhook_url,
+            data=data,
+            headers={'Content-Type': 'application/json'}
+        )
+        urllib.request.urlopen(req, timeout=5)
+        print("SUCCESS SYNC TO GOOGLE SHEETS")
+    except Exception as e:
+        print("GOOGLE SHEETS SYNC NOTICE:", e)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -95,14 +120,19 @@ app.add_middleware(
 )
 
 class DocumentUpdate(BaseModel):
-    nama_klien: str
-    jenis_dokumen: str
-    nomor_identitas: str
-    nilai_proyek: str
-    obligee: str
-    pekerjaan: str
-    masa_berlaku: str
-    teks_dokumen: str
+    nama_klien: Optional[str] = ""
+    jenis_dokumen: Optional[str] = ""
+    nomor_identitas: Optional[str] = ""
+    nilai_proyek: Optional[str] = ""
+    obligee: Optional[str] = ""
+    pekerjaan: Optional[str] = ""
+    masa_berlaku: Optional[str] = ""
+    teks_dokumen: Optional[str] = ""
+    kode_jenis: Optional[str] = ""
+    tgl_terbit: Optional[str] = ""
+    tgl_awal: Optional[str] = ""
+    tgl_akhir: Optional[str] = ""
+    durasi_hk: Optional[str] = ""
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -138,21 +168,26 @@ def parse_robust_json(content, fallback_data):
             pass
             
     # 2. Regex field extractor if JSON was truncated or malformed
-    keys = ["jenis_jaminan", "nomor_jaminan", "nilai_jaminan", "principal", "obligee", "pekerjaan", "masa_berlaku", "teks_asli"]
+    keys = [
+        "kode_jenis", "jenis_jaminan", "nomor_jaminan", "nilai_jaminan", 
+        "principal", "obligee", "pekerjaan", "tgl_terbit", "tgl_awal", 
+        "tgl_akhir", "durasi_hk", "masa_berlaku", "teks_asli"
+    ]
     for k in keys:
         match = re.search(rf'"{k}"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', clean, re.DOTALL)
         if match:
             fallback_data[k] = match.group(1).replace('\\"', '"')
             
-    if not fallback_data["teks_asli"] or fallback_data["teks_asli"] == "-":
+    if not fallback_data.get("teks_asli") or fallback_data["teks_asli"] == "-":
         fallback_data["teks_asli"] = clean.strip()
         
     return fallback_data
 
 def rapikan_teks(teks_mentah):
     fallback_data = {
-        "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
+        "kode_jenis": "PB", "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
         "principal": "-", "obligee": "-", "pekerjaan": "-", 
+        "tgl_terbit": "-", "tgl_awal": "-", "tgl_akhir": "-", "durasi_hk": "-",
         "masa_berlaku": "-", "teks_asli": teks_mentah
     }
     if len(teks_mentah.strip()) < 20: return fallback_data
@@ -163,29 +198,44 @@ def rapikan_teks(teks_mentah):
         
     base_prompt = (
         "Anda adalah asisten AI ahli administrasi asuransi Surety Bond & Bank Garansi Indonesia.\n"
-        "Tugas Anda mengekstrak informasi penting dari teks dokumen menjadi format JSON murni.\n\n"
-        "PANDUAN EKSTRAKSI DOMAIN:\n"
-        "- principal: Nama Perusahaan/Badan Hukum Pemohon/Terjamin/Penyedia/Kontraktor (contoh: CV. ..., PT. ...)\n"
-        "- obligee: Nama Penerima Jaminan/Pemilik Proyek/Pemilik Pekerjaan/Pejabat Pembuat Komitmen (PPK)/Dinas/Kementerian/BUMN/Perusahaan Pemberi Kerja\n"
-        "- jenis_jaminan: Jenis jaminan (Jaminan Pelaksanaan, Jaminan Uang Muka, Jaminan Penawaran, Jaminan Pemeliharaan, Surety Bond, dll)\n"
-        "- nilai_jaminan: Nilai nominal jaminan atau nilai proyek (sertakan 'Rp' dan angka lengkap)\n"
-        "- nomor_jaminan: Nomor identitas jaminan / nomor surat / nomor permohonan / SPPBJ / register\n"
-        "- pekerjaan: Nama kegiatan / pengadaan / paket proyek pekerjaan\n"
-        "- masa_berlaku: Jangka waktu jaminan / jumlah hari kalender (HK) / rentang tanggal berlaku (contoh: 120 HK atau tanggal s/d tanggal)\n"
+        "Tugas Anda mengekstrak informasi dokumen menjadi format JSON standar register asuransi:\n\n"
+        "ATURAN KODE JENIS BOND (PENTING):\n"
+        "- 'PB' = Jaminan Pelaksanaan (Performance Bond)\n"
+        "- 'MB' = Jaminan Pemeliharaan (Maintenance Bond)\n"
+        "- 'APB' = Jaminan Uang Muka (Advance Payment Bond)\n"
+        "- 'BB' = Jaminan Penawaran (Bid Bond / Tender)\n\n"
+        "PANDUAN EKSTRAKSI FIELD:\n"
+        "- nomor_jaminan: Nomor Sertifikat Polis / Nomor Jaminan / SPPBJ / Nomor Permohonan\n"
+        "- kode_jenis: Kode singkatan ('PB', 'MB', 'APB', atau 'BB')\n"
+        "- jenis_jaminan: Nama lengkap jenis jaminan (contoh: 'PB - Jaminan Pelaksanaan', 'MB - Jaminan Pemeliharaan')\n"
+        "- principal: Nama Perusahaan/Badan Hukum Pemohon/Terjamin/Penyedia (contoh: CV. ..., PT. ...)\n"
+        "- obligee: Nama Penerima Jaminan/Pemilik Proyek/Pemilik Pekerjaan/Pejabat Pembuat Komitmen (PPK)/Dinas/Kementerian/BUMN/Pemberi Kerja\n"
+        "- nilai_jaminan: Nilai uang jaminan (sertakan 'Rp' dan nominal lengkap, contoh: 'Rp 14.945.040,00')\n"
+        "- pekerjaan: Nama kegiatan / pengadaan / proyek pekerjaan secara lengkap\n"
+        "- tgl_terbit: Tanggal surat/dokumen ditandatangani/diterbitkan (format: DD/MM/YYYY atau -)\n"
+        "- tgl_awal: Tanggal mulai berlaku jaminan (format: DD/MM/YYYY atau -)\n"
+        "- tgl_akhir: Tanggal berakhirnya jaminan (format: DD/MM/YYYY atau -)\n"
+        "- durasi_hk: Angka jumlah hari kalender / hari kerja (contoh: 50, 120, 180)\n"
+        "- masa_berlaku: Ringkasan rentang tanggal/jangka waktu (contoh: '50 hari kalender (23 Juni 2026 s/d 11 Agustus 2026)')\n"
         "- teks_asli: Rapikan teks OCR dengan jarak baris/enter baru untuk tiap poin penomoran atau pergantian data\n\n"
-        "Format respons HANYA JSON:\n"
+        "Format respons HANYA JSON murni:\n"
         "{\n"
+        '  "kode_jenis": "PB/MB/APB/BB",\n'
         '  "jenis_jaminan": "...",\n'
         '  "nomor_jaminan": "...",\n'
         '  "nilai_jaminan": "...",\n'
         '  "principal": "...",\n'
         '  "obligee": "...",\n'
         '  "pekerjaan": "...",\n'
+        '  "tgl_terbit": "...",\n'
+        '  "tgl_awal": "...",\n'
+        '  "tgl_akhir": "...",\n'
+        '  "durasi_hk": "...",\n'
         '  "masa_berlaku": "...",\n'
         '  "teks_asli": "..."\n'
         "}\n"
         "Jangan gunakan tag <think>. Jika kolom benar-benar tidak ada di teks, isi '-'.\n\n"
-        "Teks OCR Dokumen:\n" + teks_mentah
+        "Teks Dokumen:\n" + teks_mentah
     )
     
     result_data = dict(fallback_data)
@@ -201,7 +251,7 @@ def rapikan_teks(teks_mentah):
         print("ERROR AI EXTRACTION ATTEMPT 1:", e)
         
     # Auto-Retry Loop jika ada kolom penting yang masih '-' (Maksimal 3 kali percobaan bertarget)
-    critical_keys = ["principal", "obligee", "nilai_jaminan", "pekerjaan", "masa_berlaku", "jenis_jaminan"]
+    critical_keys = ["principal", "obligee", "nilai_jaminan", "pekerjaan", "masa_berlaku", "jenis_jaminan", "durasi_hk"]
     max_retries = 3
     for attempt in range(2, max_retries + 1):
         missing_keys = [k for k in critical_keys if not result_data.get(k) or result_data[k] == "-"]
@@ -216,7 +266,8 @@ def rapikan_teks(teks_mentah):
             "- Jika 'obligee' belum ada: cari bagian PENERIMA JAMINAN, PEMILIK PROYEK, PEJABAT PEMBUAT KOMITMEN (PPK), DINAS, INSTANSI, atau PERUSAHAAN PEMBERI KERJA.\n"
             "- Jika 'principal' belum ada: cari bagian PEMOHON, TERJAMIN, PENYEDIA JASA, NAMA PERUSAHAAN (PT/CV).\n"
             "- Jika 'nilai_jaminan' belum ada: cari simbol 'Rp', nilai jaminan %, atau nominal angka kontrak.\n"
-            "- Jika 'pekerjaan' belum ada: cari nama paket pekerjaan, pengadaan barang/jasa, atau pembangunan.\n\n"
+            "- Jika 'pekerjaan' belum ada: cari nama paket pekerjaan, pengadaan barang/jasa, atau pembangunan.\n"
+            "- Jika 'durasi_hk' atau tanggal belum ada: cari angka hari kalender/kerja (HK) dan rentang tanggal (s/d).\n\n"
             "Berikan respons JSON HANYA untuk kolom-kolom yang masih kosong tersebut:\n"
             "{\n" + ",\n".join([f'  "{k}": "..."' for k in missing_keys]) + "\n}\n"
             "Teks Dokumen:\n" + teks_mentah
@@ -241,8 +292,9 @@ def rapikan_teks(teks_mentah):
 def extract_from_image_vision(base64_image):
     """Mengekstrak teks dari gambar dengan Groq Vision lalu menstrukturkannya dengan GPT-120B"""
     fallback_data = {
-        "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
+        "kode_jenis": "PB", "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
         "principal": "-", "obligee": "-", "pekerjaan": "-", 
+        "tgl_terbit": "-", "tgl_awal": "-", "tgl_akhir": "-", "durasi_hk": "-",
         "masa_berlaku": "-", "teks_asli": ""
     }
     if not groq_clients:
@@ -337,11 +389,37 @@ def save_document(doc: DocumentUpdate):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO dokumen (nama_klien, jenis_dokumen, nomor_identitas, nilai_proyek, obligee, pekerjaan, masa_berlaku, teks_dokumen, created_at, updated_at) 
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, waktu_sekarang, waktu_sekarang))
+        INSERT INTO dokumen (
+            nama_klien, jenis_dokumen, nomor_identitas, nilai_proyek, 
+            obligee, pekerjaan, masa_berlaku, teks_dokumen, 
+            kode_jenis, tgl_terbit, tgl_awal, tgl_akhir, durasi_hk,
+            created_at, updated_at
+        ) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, 
+        doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, 
+        doc.kode_jenis, doc.tgl_terbit, doc.tgl_awal, doc.tgl_akhir, doc.durasi_hk,
+        waktu_sekarang, waktu_sekarang
+    ))
     conn.commit()
     conn.close()
+
+    # Trigger Live Sync to Google Sheets
+    sheets_payload = {
+        "no_polis": doc.nomor_identitas or "-",
+        "jenis_bond": doc.kode_jenis or "PB",
+        "principal": doc.nama_klien or "-",
+        "obligee": doc.obligee or "-",
+        "pekerjaan": doc.pekerjaan or "-",
+        "nilai_bond": doc.nilai_proyek or "-",
+        "tgl_terbit": doc.tgl_terbit or doc.tgl_awal or "-",
+        "tgl_awal": doc.tgl_awal or "-",
+        "tgl_akhir": doc.tgl_akhir or "-",
+        "durasi_hk": doc.durasi_hk or "-"
+    }
+    sync_to_google_sheets(sheets_payload)
+
     return {"status": "success"}
 
 @app.delete("/api/documents/{doc_id}")
@@ -382,7 +460,12 @@ def update_document(doc_id: int, doc: DocumentUpdate):
         "nilai_proyek": ("Nilai Jaminan", doc.nilai_proyek),
         "obligee": ("Obligee", doc.obligee),
         "pekerjaan": ("Pekerjaan", doc.pekerjaan),
-        "masa_berlaku": ("Masa Berlaku", doc.masa_berlaku)
+        "masa_berlaku": ("Masa Berlaku", doc.masa_berlaku),
+        "kode_jenis": ("Kode Jenis Bond", doc.kode_jenis),
+        "tgl_terbit": ("Tanggal Terbit", doc.tgl_terbit),
+        "tgl_awal": ("Tanggal Awal", doc.tgl_awal),
+        "tgl_akhir": ("Tanggal Akhir", doc.tgl_akhir),
+        "durasi_hk": ("Durasi HK", doc.durasi_hk)
     }
     
     for key, (label, new_val) in field_map.items():
@@ -402,9 +485,17 @@ def update_document(doc_id: int, doc: DocumentUpdate):
     # 4. Update tabel dokumen
     cursor.execute("""
         UPDATE dokumen 
-        SET nama_klien=%s, jenis_dokumen=%s, nomor_identitas=%s, nilai_proyek=%s, obligee=%s, pekerjaan=%s, masa_berlaku=%s, teks_dokumen=%s, updated_at=%s
+        SET nama_klien=%s, jenis_dokumen=%s, nomor_identitas=%s, nilai_proyek=%s, 
+            obligee=%s, pekerjaan=%s, masa_berlaku=%s, teks_dokumen=%s, 
+            kode_jenis=%s, tgl_terbit=%s, tgl_awal=%s, tgl_akhir=%s, durasi_hk=%s,
+            updated_at=%s
         WHERE id=%s
-    """, (doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, waktu_sekarang, doc_id))
+    """, (
+        doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, 
+        doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, 
+        doc.kode_jenis, doc.tgl_terbit, doc.tgl_awal, doc.tgl_akhir, doc.durasi_hk,
+        waktu_sekarang, doc_id
+    ))
     
     conn.commit()
     conn.close()
