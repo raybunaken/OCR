@@ -37,8 +37,8 @@ def call_groq_api(**kwargs):
         except Exception as e:
             last_exception = e
             error_str = str(e).lower()
-            if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str or "413" in error_str:
-                print(f"Fallback (Key {i+1} Limit): Mencoba kunci berikutnya... Error: {e}")
+            if any(err in error_str for err in ["429", "rate limit", "rate_limit", "413", "503", "capacity", "over capacity", "service unavailable"]):
+                print(f"Fallback (Key {i+1} Limit/Capacity): Mencoba kunci berikutnya... Error: {e}")
                 continue
             break
             

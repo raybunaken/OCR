@@ -13,6 +13,7 @@ interface BatchFileItem {
 }
 
 export default function Home() {
+  const APP_ENV = "testing";
   const [activeTab, setActiveTab] = useState("dashboard");
   const [uploadMode, setUploadMode] = useState<"single" | "batch">("single");
   const [file, setFile] = useState<File | null>(null);
@@ -155,7 +156,7 @@ export default function Home() {
   // Fetch Documents
   const fetchDocuments = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/documents`);
+      const res = await fetch(`${API_URL}/api/documents?env=${APP_ENV}`);
       const data = await res.json();
       if (Array.isArray(data)) {
         setDocuments(data);
@@ -288,7 +289,8 @@ export default function Home() {
             tgl_terbit: extracted.tgl_terbit || extracted.tgl_awal || "-",
             tgl_awal: extracted.tgl_awal || "-",
             tgl_akhir: extracted.tgl_akhir || "-",
-            durasi_hk: String(extracted.durasi_hk || calculateDays(extracted.masa_berlaku) || "-")
+            durasi_hk: String(extracted.durasi_hk || calculateDays(extracted.masa_berlaku) || "-"),
+            env: APP_ENV
           };
 
           await fetch(`${API_URL}/api/documents`, {
@@ -370,7 +372,8 @@ export default function Home() {
           tgl_terbit: extracted.tgl_terbit || extracted.tgl_awal || "-",
           tgl_awal: extracted.tgl_awal || "-",
           tgl_akhir: extracted.tgl_akhir || "-",
-          durasi_hk: String(extracted.durasi_hk || calculateDays(extracted.masa_berlaku) || "-")
+          durasi_hk: String(extracted.durasi_hk || calculateDays(extracted.masa_berlaku) || "-"),
+          env: APP_ENV
         };
 
         await fetch(`${API_URL}/api/documents`, {
@@ -412,7 +415,8 @@ export default function Home() {
       tgl_terbit: extractedData.tgl_terbit || extractedData.tgl_awal || "-",
       tgl_awal: extractedData.tgl_awal || "-",
       tgl_akhir: extractedData.tgl_akhir || "-",
-      durasi_hk: String(extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || "-")
+      durasi_hk: String(extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || "-"),
+      env: APP_ENV
     };
 
     try {
@@ -612,10 +616,16 @@ export default function Home() {
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
         <div>
-          <h1 className="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-600 tracking-tight">
-            Ekstraktor Asuransi AI
-          </h1>
-          <p className="text-slate-400 mt-2 text-sm sm:text-base">Sistem Manajemen Dokumen Asuransi Berbasis AI</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-600 tracking-tight">
+              Ekstraktor Asuransi AI
+            </h1>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+              🧪 Testing Lab (Tab: TESTING)
+            </span>
+          </div>
+          <p className="text-slate-400 mt-2 text-sm sm:text-base">Laboratorium Uji Coba Dokumen Asuransi (Data Terisolasi)</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
           <button 
