@@ -181,6 +181,45 @@ def parse_robust_json(content, fallback_data):
         
     return fallback_data
 
+MONTH_MAP = {
+    'januari': '01', 'jan': '01',
+    'februari': '02', 'feb': '02',
+    'maret': '03', 'mar': '03',
+    'april': '04', 'apr': '04',
+    'mei': '05', 'may': '05',
+    'juni': '06', 'jun': '06',
+    'juli': '07', 'jul': '07',
+    'agustus': '08', 'ags': '08', 'agu': '08', 'agt': '08',
+    'september': '09', 'sep': '09',
+    'oktober': '10', 'okt': '10',
+    'november': '11', 'nopember': '11', 'nov': '11', 'nop': '11',
+    'desember': '12', 'des': '12'
+}
+
+def parse_dates_from_text(text_to_search):
+    if not text_to_search:
+        return []
+    month_names = "|".join(MONTH_MAP.keys())
+    named_pattern = re.compile(rf'(\d{{1,2}})\s+({month_names})\s+(\d{{4}})', re.IGNORECASE)
+    
+    found_dates = []
+    for match in named_pattern.finditer(text_to_search):
+        day = match.group(1).zfill(2)
+        month_str = match.group(2).lower()
+        month = MONTH_MAP.get(month_str, "01")
+        year = match.group(3)
+        found_dates.append(f"{day}/{month}/{year}")
+        
+    if not found_dates:
+        num_pattern = re.compile(r'(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})')
+        for match in num_pattern.finditer(text_to_search):
+            day = match.group(1).zfill(2)
+            month = match.group(2).zfill(2)
+            year = match.group(3)
+            found_dates.append(f"{day}/{month}/{year}")
+            
+    return found_dates
+
 def rapikan_teks(teks_mentah):
     fallback_data = {
         "kode_jenis": "PB", "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
@@ -249,7 +288,7 @@ def rapikan_teks(teks_mentah):
         print("ERROR AI EXTRACTION ATTEMPT 1:", e)
         
     # Auto-Retry Loop jika ada kolom penting yang masih '-' (Maksimal 3 kali percobaan bertarget)
-    critical_keys = ["principal", "obligee", "nilai_jaminan", "pekerjaan", "masa_berlaku", "jenis_jaminan", "durasi_hk"]
+    critical_keys = ["principal", "obligee", "nilai_jaminan", "pekerjaan", "masa_berlaku", "jenis_jaminan", "durasi_hk", "tgl_awal", "tgl_akhir"]
     max_retries = 3
     for attempt in range(2, max_retries + 1):
         missing_keys = [k for k in critical_keys if not result_data.get(k) or result_data[k] == "-"]
@@ -284,6 +323,39 @@ def rapikan_teks(teks_mentah):
         except Exception as err:
             print(f"ERROR ON AUTO-RETRY {attempt}:", err)
             
+    # POST-PROCESSING: Normalisasi tanggal dan durasi deterministik
+    # 1. Jika tgl_awal atau tgl_akhir kosong/'-', cari dari masa_berlaku atau teks mentah
+    if not result_data.get("tgl_awal") or result_data["tgl_awal"] == "-" or not result_data.get("tgl_akhir") or result_data["tgl_akhir"] == "-":
+        dates_in_masa = parse_dates_from_text(result_data.get("masa_berlaku", ""))
+        if len(dates_in_masa) >= 2:
+            if not result_data.get("tgl_awal") or result_data["tgl_awal"] == "-":
+                result_data["tgl_awal"] = dates_in_masa[0]
+            if not result_data.get("tgl_akhir") or result_data["tgl_akhir"] == "-":
+                result_data["tgl_akhir"] = dates_in_masa[1]
+        else:
+            all_dates = parse_dates_from_text(teks_mentah)
+            if len(all_dates) >= 2:
+                if not result_data.get("tgl_awal") or result_data["tgl_awal"] == "-":
+                    result_data["tgl_awal"] = all_dates[0]
+                if not result_data.get("tgl_akhir") or result_data["tgl_akhir"] == "-":
+                    result_data["tgl_akhir"] = all_dates[1]
+
+    # 2. Jika tgl_terbit kosong/'-', cari tanggal SPPBJ / Surat / atau gunakan tgl_awal
+    if not result_data.get("tgl_terbit") or result_data["tgl_terbit"] == "-":
+        sppbj_match = re.search(r'(?:SPPBJ|Surat|Tanggal|Tgl)[^\n\r]*?(\d{1,2}\s+(?:Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Nopember|Desember)\s+\d{4})', teks_mentah, re.IGNORECASE)
+        if sppbj_match:
+            parsed = parse_dates_from_text(sppbj_match.group(1))
+            if parsed:
+                result_data["tgl_terbit"] = parsed[0]
+        elif result_data.get("tgl_awal") and result_data["tgl_awal"] != "-":
+            result_data["tgl_terbit"] = result_data["tgl_awal"]
+
+    # 3. Jika durasi_hk kosong/'-', cari angka hari
+    if not result_data.get("durasi_hk") or result_data["durasi_hk"] == "-":
+        dur_match = re.search(r'(\d+)\s*(?:HK|Hari|hari kalender|hari kerja)', result_data.get("masa_berlaku", "") + " " + teks_mentah, re.IGNORECASE)
+        if dur_match:
+            result_data["durasi_hk"] = dur_match.group(1)
+
     return result_data
 
 

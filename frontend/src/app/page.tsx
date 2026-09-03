@@ -1080,7 +1080,7 @@ export default function Home() {
                           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Tanggal Terbit</label>
                           <input 
                             type="text" 
-                            value={extractedData.tgl_terbit || extractedData.tgl_awal || ""} 
+                            value={extractedData.tgl_terbit && extractedData.tgl_terbit !== "-" ? extractedData.tgl_terbit : (extractedData.tgl_awal && extractedData.tgl_awal !== "-" ? extractedData.tgl_awal : "")} 
                             placeholder="DD/MM/YYYY" 
                             onFocus={() => highlightInSource(extractedData.tgl_terbit)} 
                             onChange={(e) => setExtractedData({...extractedData, tgl_terbit: e.target.value})} 
@@ -1094,8 +1094,8 @@ export default function Home() {
                         <div className="flex items-center justify-between">
                           <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Jangka Waktu Jaminan</label>
                           {(() => {
-                            const days = extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || (
-                              extractedData.tgl_awal && extractedData.tgl_akhir ? calculateDays(`${extractedData.tgl_awal} s/d ${extractedData.tgl_akhir}`) : null
+                            const days = (extractedData.durasi_hk && extractedData.durasi_hk !== "-") ? extractedData.durasi_hk : calculateDays(extractedData.masa_berlaku) || (
+                              extractedData.tgl_awal && extractedData.tgl_akhir && extractedData.tgl_awal !== "-" && extractedData.tgl_akhir !== "-" ? calculateDays(`${extractedData.tgl_awal} s/d ${extractedData.tgl_akhir}`) : null
                             );
                             if (days) {
                               return (
@@ -1117,7 +1117,7 @@ export default function Home() {
                             <input 
                               type="text" 
                               placeholder="DD/MM/YYYY"
-                              value={extractedData.tgl_awal || ""} 
+                              value={extractedData.tgl_awal && extractedData.tgl_awal !== "-" ? extractedData.tgl_awal : ""} 
                               onFocus={() => highlightInSource(extractedData.tgl_awal)} 
                               onChange={(e) => setExtractedData({...extractedData, tgl_awal: e.target.value})} 
                               className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center" 
@@ -1128,7 +1128,7 @@ export default function Home() {
                             <input 
                               type="text" 
                               placeholder="DD/MM/YYYY"
-                              value={extractedData.tgl_akhir || ""} 
+                              value={extractedData.tgl_akhir && extractedData.tgl_akhir !== "-" ? extractedData.tgl_akhir : ""} 
                               onFocus={() => highlightInSource(extractedData.tgl_akhir)} 
                               onChange={(e) => setExtractedData({...extractedData, tgl_akhir: e.target.value})} 
                               className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center" 
@@ -1139,7 +1139,7 @@ export default function Home() {
                             <input 
                               type="text" 
                               placeholder="Contoh: 120"
-                              value={extractedData.durasi_hk || ""} 
+                              value={extractedData.durasi_hk && extractedData.durasi_hk !== "-" ? extractedData.durasi_hk : ""} 
                               onFocus={() => highlightInSource(extractedData.durasi_hk)} 
                               onChange={(e) => setExtractedData({...extractedData, durasi_hk: e.target.value})} 
                               className="w-full glass-input rounded-xl px-2.5 py-2 text-xs text-center font-bold text-sky-400" 
