@@ -584,6 +584,23 @@ export default function Home() {
     setTimeout(() => setIsCopiedOcr(false), 2500);
   };
 
+  const handleOpenSpreadsheet = () => {
+    const savedUrl = typeof window !== "undefined" ? localStorage.getItem("google_sheets_url") : null;
+    if (savedUrl && savedUrl.startsWith("http")) {
+      window.open(savedUrl, "_blank");
+    } else {
+      const inputUrl = window.prompt(
+        "Masukkan Link Google Spreadsheet Anda (contoh: https://docs.google.com/spreadsheets/d/...):",
+        savedUrl || "https://docs.google.com/spreadsheets"
+      );
+      if (inputUrl && inputUrl.trim().startsWith("http")) {
+        localStorage.setItem("google_sheets_url", inputUrl.trim());
+        toast.success("Link Google Spreadsheet berhasil disimpan!");
+        window.open(inputUrl.trim(), "_blank");
+      }
+    }
+  };
+
 
 
   return (
@@ -596,19 +613,30 @@ export default function Home() {
           </h1>
           <p className="text-slate-400 mt-2 text-sm sm:text-base">Sistem Manajemen Dokumen Asuransi Berbasis AI</p>
         </div>
-        <div className="glass-panel rounded-full p-1.5 flex gap-2 self-start md:self-auto shadow-lg shadow-black/20">
+        <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
           <button 
-            onClick={() => setActiveTab("dashboard")}
-            className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${activeTab === "dashboard" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
+            onClick={handleOpenSpreadsheet}
+            className="px-4 py-2.5 rounded-full text-xs font-bold bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/50 hover:border-emerald-400 transition-all flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-950/40"
+            title="Buka Google Spreadsheet kantor di tab baru"
           >
-            Dashboard
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Buka Google Sheets ↗</span>
           </button>
-          <button 
-            onClick={() => setActiveTab("upload")}
-            className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${activeTab === "upload" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
-          >
-            Upload Dokumen
-          </button>
+
+          <div className="glass-panel rounded-full p-1.5 flex gap-2 shadow-lg shadow-black/20">
+            <button 
+              onClick={() => setActiveTab("dashboard")}
+              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${activeTab === "dashboard" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
+            >
+              Dashboard
+            </button>
+            <button 
+              onClick={() => setActiveTab("upload")}
+              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${activeTab === "upload" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
+            >
+              Upload Dokumen
+            </button>
+          </div>
         </div>
       </div>
 
@@ -656,17 +684,27 @@ export default function Home() {
                   <p className="text-slate-400 text-xs sm:text-sm mt-1">Daftar seluruh riwayat dokumen asuransi yang tersimpan</p>
                 </div>
 
-                <a 
-                  href={`${API_URL}/api/documents/export/excel`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/25 flex items-center gap-2 border border-emerald-400/40 cursor-pointer self-stretch sm:self-auto justify-center"
-                >
-                  <svg className="w-4 h-4 text-emerald-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span>Unduh Spreadsheet (.xlsx)</span>
-                </a>
+                <div className="flex flex-wrap items-center gap-2.5 self-stretch sm:self-auto">
+                  <button 
+                    onClick={handleOpenSpreadsheet}
+                    className="bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border border-emerald-500/40 hover:border-emerald-400 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Buka Google Sheets ↗</span>
+                  </button>
+
+                  <a 
+                    href={`${API_URL}/api/documents/export/excel`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/25 flex items-center gap-2 border border-emerald-400/40 cursor-pointer self-stretch sm:self-auto justify-center"
+                  >
+                    <svg className="w-4 h-4 text-emerald-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span>Unduh Spreadsheet (.xlsx)</span>
+                  </a>
+                </div>
               </div>
 
               {/* Filters & Search Control Bar */}
@@ -938,10 +976,14 @@ export default function Home() {
                         <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.9)] shrink-0"></div>
                         <div>
                           <h2 className="text-lg font-bold text-white tracking-tight">Data Terstruktur</h2>
-                          <div className="flex items-center gap-1.5 mt-0.5">
+                          <button 
+                            onClick={handleOpenSpreadsheet}
+                            className="flex items-center gap-1.5 mt-0.5 text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold hover:underline cursor-pointer group"
+                            title="Klik untuk membuka Google Spreadsheet"
+                          >
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                            <span className="text-[11px] text-emerald-400 font-medium">Terhubung Google Sheets</span>
-                          </div>
+                            <span>Terhubung Google Sheets ↗</span>
+                          </button>
                         </div>
                       </div>
                       
