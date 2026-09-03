@@ -1046,19 +1046,18 @@ export default function Home() {
                     
                     <div className="space-y-4 mb-6">
                       {/* Row 1: Nomor Polis & Jenis Bond */}
-                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
-                        <div className="sm:col-span-5">
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5">
+                        <div className="sm:col-span-4">
                           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">No. Polis / Jaminan</label>
                           <input 
                             type="text" 
                             value={extractedData.nomor_jaminan || ""} 
-                            placeholder="Contoh: PP10051126000044" 
                             onFocus={() => highlightInSource(extractedData.nomor_jaminan)} 
                             onChange={(e) => setExtractedData({...extractedData, nomor_jaminan: e.target.value})} 
                             className="w-full glass-input rounded-xl px-3.5 py-2.5 text-sm" 
                           />
                         </div>
-                        <div className="sm:col-span-7">
+                        <div className="sm:col-span-8">
                           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Jenis Bond</label>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                             {[
@@ -1072,19 +1071,20 @@ export default function Home() {
                                 <button
                                   key={b.code}
                                   type="button"
+                                  title={`${b.code} - Jaminan ${b.desc}`}
                                   onClick={() => setExtractedData({
                                     ...extractedData, 
                                     kode_jenis: b.code,
                                     jenis_jaminan: `${b.code} - Jaminan ${b.desc}`
                                   })}
-                                  className={`cursor-pointer px-2 py-1.5 rounded-xl text-center transition-all border ${
+                                  className={`cursor-pointer px-1 sm:px-2 py-1.5 rounded-xl text-center transition-all border ${
                                     isSelected
                                       ? "bg-sky-500 text-white border-sky-400 shadow-md shadow-sky-500/30 ring-1 ring-sky-300 scale-102 font-bold"
                                       : "bg-slate-900/80 text-slate-300 border-slate-700/80 hover:bg-slate-800 hover:text-white hover:border-slate-600"
                                   }`}
                                 >
                                   <div className="text-xs font-black tracking-wide leading-none">{b.code}</div>
-                                  <div className="text-[9px] opacity-75 mt-0.5 truncate leading-none">{b.desc}</div>
+                                  <div className="text-[9px] sm:text-[10px] opacity-85 mt-1 leading-tight tracking-tight whitespace-normal">{b.desc}</div>
                                 </button>
                               );
                             })}
