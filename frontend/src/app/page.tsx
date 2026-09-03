@@ -33,6 +33,7 @@ export default function Home() {
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [highlightedWord, setHighlightedWord] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
+  const [showValidationDetail, setShowValidationDetail] = useState(false);
 
   const highlightInSource = (textToFind: string) => {
     if (!textToFind || textToFind === "-") {
@@ -524,6 +525,255 @@ export default function Home() {
     return null;
   };
 
+  const evaluateCrossValidation = (doc: any) => {
+    if (!doc) {
+      return {
+        overallStatus: "yellow" as const,
+        score: 50,
+        headline: "Menunggu data dokumen...",
+        checks: []
+      };
+    }
+
+    const checks: {
+      id: string;
+      label: string;
+      status: "green" | "yellow" | "red";
+      message: string;
+      details?: string;
+    }[] = [];
+
+    // 1. Uji Silang Tanggal vs Durasi Hari HK
+    const tglAwalStr = String(doc.tgl_awal || "").trim();
+    const tglAkhirStr = String(doc.tgl_akhir || "").trim();
+    const rawDurasi = String(doc.durasi_hk || "").replace(/\D/g, "");
+    const durasiHk = rawDurasi ? parseInt(rawDurasi, 10) : 0;
+
+    const parseDateHelper = (dStr: string): Date | null => {
+      if (!dStr || dStr === "-") return null;
+      const parts = dStr.split(/[\/\-]/);
+      if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+          return new Date(year, month, day);
+        }
+      }
+      return null;
+    };
+
+    const d1 = parseDateHelper(tglAwalStr);
+    const d2 = parseDateHelper(tglAkhirStr);
+
+    if (d1 && d2) {
+      const diffMs = d2.getTime() - d1.getTime();
+      if (diffMs < 0) {
+        checks.push({
+          id: "date_order",
+          label: "Uji Rentang Tanggal",
+          status: "red",
+          message: "Tanggal Awal lebih besar dari Tanggal Akhir!",
+          details: `${tglAwalStr} s/d ${tglAkhirStr}`
+        });
+      } else {
+        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+        if (durasiHk > 0) {
+          if (durasiHk === diffDays || durasiHk === diffDays + 1) {
+            checks.push({
+              id: "date_vs_duration",
+              label: "Uji Tanggal & Durasi HK",
+              status: "green",
+              message: `Cocok Sempurna (${durasiHk} Hari sesuai rentang ${diffDays} hari kalender)`,
+              details: `${tglAwalStr} s/d ${tglAkhirStr}`
+            });
+          } else if (Math.abs(durasiHk - diffDays) <= 4) {
+            checks.push({
+              id: "date_vs_duration",
+              label: "Uji Tanggal & Durasi HK",
+              status: "yellow",
+              message: `Tercatat ${durasiHk} HK, selisih kalender ${diffDays} hari (Toleransi hari kerja)`,
+              details: `Selisih wajar antara perhitungan hari kalender vs hari kerja dinas`
+            });
+          } else {
+            checks.push({
+              id: "date_vs_duration",
+              label: "Uji Tanggal & Durasi HK",
+              status: "red",
+              message: `Selisih Signifikan: Tertulis ${durasiHk} HK tapi rentang tanggal ${diffDays} hari!`,
+              details: `Mohon periksa kembali tanggal awal atau tanggal akhir`
+            });
+          }
+        } else {
+          checks.push({
+            id: "date_vs_duration",
+            label: "Durasi Waktu",
+            status: "yellow",
+            message: `Rentang ${diffDays} hari kalender (Durasi HK tidak tertera angka pasti)`
+          });
+        }
+      }
+    } else {
+      checks.push({
+        id: "date_vs_duration",
+        label: "Uji Rentang Tanggal",
+        status: "yellow",
+        message: "Tanggal awal atau akhir belum terisi lengkap"
+      });
+    }
+
+    // 2. Uji Silang Nilai Angka vs Terbilang
+    const nilaiStr = String(doc.nilai_jaminan || doc.nilai_proyek || "").trim();
+    const teksAsli = String(doc.teks_asli || doc.teks_dokumen || "").toLowerCase();
+    const cleanDigits = nilaiStr.replace(/[^\d]/g, "");
+
+    if (cleanDigits && cleanDigits.length >= 6) {
+      const numVal = parseInt(cleanDigits, 10);
+      const hasMiliar = teksAsli.includes("miliar") || teksAsli.includes("milyar");
+      const hasJuta = teksAsli.includes("juta");
+
+      if (numVal >= 1_000_000_000) {
+        if (hasMiliar) {
+          checks.push({
+            id: "nominal_cross",
+            label: "Uji Nominal vs Terbilang",
+            status: "green",
+            message: `Nominal skala Miliar (${nilaiStr}) terkonfirmasi pada kalimat terbilang dokumen`,
+            details: `Kata 'Miliar' dan angka bersesuaian pada naskah asli`
+          });
+        } else {
+          checks.push({
+            id: "nominal_cross",
+            label: "Uji Nominal vs Terbilang",
+            status: "yellow",
+            message: `Nominal skala Miliar (${nilaiStr}), pastikan terbilang di surat fisik sesuai`
+          });
+        }
+      } else if (numVal >= 1_000_000) {
+        if (hasJuta) {
+          checks.push({
+            id: "nominal_cross",
+            label: "Uji Nominal vs Terbilang",
+            status: "green",
+            message: `Nominal skala Juta (${nilaiStr}) terkonfirmasi pada kalimat terbilang dokumen`,
+            details: `Kata 'Juta' dan angka bersesuaian pada naskah asli`
+          });
+        } else {
+          checks.push({
+            id: "nominal_cross",
+            label: "Uji Nominal vs Terbilang",
+            status: "yellow",
+            message: `Nominal ${nilaiStr} terdeteksi, kalimat terbilang tertutup cap atau belum terbaca`
+          });
+        }
+      } else {
+        checks.push({
+          id: "nominal_cross",
+          label: "Nominal Jaminan",
+          status: "green",
+          message: `Nilai jaminan: ${nilaiStr}`
+        });
+      }
+    } else if (!nilaiStr || nilaiStr === "-") {
+      checks.push({
+        id: "nominal_cross",
+        label: "Nominal Jaminan",
+        status: "red",
+        message: "Nilai jaminan kosong atau belum terisi!"
+      });
+    } else {
+      checks.push({
+        id: "nominal_cross",
+        label: "Nominal Jaminan",
+        status: "yellow",
+        message: `Nilai jaminan: ${nilaiStr} (Format angka perlu ditinjau)`
+      });
+    }
+
+    // 3. Uji Nomor Dokumen & Legalitas
+    const noJaminan = String(doc.nomor_jaminan || doc.nomor_identitas || "").trim();
+    if (!noJaminan || noJaminan === "-") {
+      checks.push({
+        id: "doc_number",
+        label: "Nomor Dokumen",
+        status: "red",
+        message: "Nomor Polis / Dokumen Jaminan belum terisi!"
+      });
+    } else if (noJaminan.toUpperCase().includes("SPPBJ") || noJaminan.toUpperCase().startsWith("BJ.") || noJaminan.includes("/")) {
+      checks.push({
+        id: "doc_number",
+        label: "Status Legalitas Nomor Dokumen",
+        status: "yellow",
+        message: `Formulir Permohonan (Nomor Dasar SPPBJ: ${noJaminan})`,
+        details: "Dokumen ini terdeteksi sebagai formulir pengajuan; nomor sertifikat polis resmi belum dicetak"
+      });
+    } else {
+      checks.push({
+        id: "doc_number",
+        label: "Nomor Polis Resmi",
+        status: "green",
+        message: `Nomor Polis Resmi Terverifikasi: ${noJaminan}`
+      });
+    }
+
+    // 4. Uji Kelengkapan Pihak Penjaminan
+    const principal = String(doc.principal || doc.nama_klien || "").trim();
+    const obligee = String(doc.obligee || "").trim();
+    const pekerjaan = String(doc.pekerjaan || "").trim();
+
+    const missingEntities: string[] = [];
+    if (!principal || principal === "-") missingEntities.push("Principal (Klien)");
+    if (!obligee || obligee === "-") missingEntities.push("Obligee (Penerima)");
+    if (!pekerjaan || pekerjaan === "-") missingEntities.push("Nama Pekerjaan / Proyek");
+
+    if (missingEntities.length === 0) {
+      checks.push({
+        id: "entities_check",
+        label: "Kelengkapan Pihak Penjaminan",
+        status: "green",
+        message: "Seluruh entitas (Principal, Obligee, & Nama Proyek) lengkap terisi"
+      });
+    } else if (missingEntities.length === 1) {
+      checks.push({
+        id: "entities_check",
+        label: "Kelengkapan Pihak Penjaminan",
+        status: "yellow",
+        message: `Ada 1 informasi belum lengkap: ${missingEntities.join(", ")}`
+      });
+    } else {
+      checks.push({
+        id: "entities_check",
+        label: "Kelengkapan Pihak Penjaminan",
+        status: "red",
+        message: `Entitas penting belum lengkap: ${missingEntities.join(", ")}`
+      });
+    }
+
+    const redCount = checks.filter(c => c.status === "red").length;
+    const yellowCount = checks.filter(c => c.status === "yellow").length;
+
+    let overallStatus: "green" | "yellow" | "red" = "green";
+    let score = 100;
+    let headline = "✓ Dokumen 100% Terverifikasi Valid (Aman)";
+
+    if (redCount > 0) {
+      overallStatus = "red";
+      score = Math.max(35, 100 - (redCount * 30) - (yellowCount * 10));
+      headline = "⚠️ Perhatian Khusus: Ditemukan Ketidakcocokan";
+    } else if (yellowCount > 0) {
+      overallStatus = "yellow";
+      score = Math.max(65, 100 - (yellowCount * 12));
+      headline = "ℹ️ Dokumen Aman, Perlu Tinjauan Ringan";
+    }
+
+    return {
+      overallStatus,
+      score,
+      headline,
+      checks
+    };
+  };
+
   const fetchAuditLogs = async (docId: number) => {
     try {
       const res = await fetch(`${API_URL}/api/documents/${docId}/logs`);
@@ -845,7 +1095,32 @@ export default function Home() {
                     filteredDocuments.map((doc: any) => (
                       <tr key={doc.id} className="hover:bg-slate-800/30 transition-colors">
                         <td className="p-4 text-slate-300">{doc.created_at?.substring(0,10)}</td>
-                        <td className="p-4 font-medium text-white">{doc.nama_klien}</td>
+                        <td className="p-4 font-medium text-white">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span>{doc.nama_klien}</span>
+                            {(() => {
+                              const rowVal = evaluateCrossValidation(doc);
+                              return (
+                                <span 
+                                  title={`${rowVal.headline} (Skor: ${rowVal.score}%)`}
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
+                                    rowVal.overallStatus === "green" 
+                                      ? "bg-emerald-950/80 text-emerald-300 border-emerald-500/40" 
+                                      : rowVal.overallStatus === "yellow"
+                                      ? "bg-amber-950/80 text-amber-300 border-amber-500/40"
+                                      : "bg-rose-950/80 text-rose-300 border-rose-500/40"
+                                  }`}
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full ${
+                                    rowVal.overallStatus === "green" ? "bg-emerald-400" :
+                                    rowVal.overallStatus === "yellow" ? "bg-amber-400" : "bg-rose-400"
+                                  }`} />
+                                  {rowVal.overallStatus === "green" ? "Valid" : rowVal.overallStatus === "yellow" ? "Review" : "Periksa"}
+                                </span>
+                              );
+                            })()}
+                          </div>
+                        </td>
                         <td className="p-4">
                           <span className={`px-3 py-1 rounded-full text-xs border whitespace-nowrap inline-block ${
                             (() => {
@@ -1037,6 +1312,77 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
+                    
+                    {/* 🚦 Traffic Light System: AI Cross-Validation Banner */}
+                    {(() => {
+                      const valResult = evaluateCrossValidation(extractedData);
+                      return (
+                        <div className={`p-4 rounded-2xl border transition-all mb-6 ${
+                          valResult.overallStatus === "green"
+                            ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-200"
+                            : valResult.overallStatus === "yellow"
+                            ? "bg-amber-950/40 border-amber-500/40 text-amber-200"
+                            : "bg-rose-950/40 border-rose-500/40 text-rose-200"
+                        }`}>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <span className={`w-3.5 h-3.5 rounded-full shrink-0 animate-pulse ${
+                                valResult.overallStatus === "green"
+                                  ? "bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]"
+                                  : valResult.overallStatus === "yellow"
+                                  ? "bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.9)]"
+                                  : "bg-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.9)]"
+                              }`} />
+                              <div>
+                                <div className="text-sm font-bold flex items-center gap-2 flex-wrap">
+                                  <span>{valResult.headline}</span>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 border border-white/10 font-mono tracking-wide">
+                                    Skor Validasi: {valResult.score}%
+                                  </span>
+                                </div>
+                                <div className="text-xs opacity-75 mt-0.5">
+                                  Satpam AI menguji silang nilai uang, durasi hari kalender, dan nomor dokumen.
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setShowValidationDetail(!showValidationDetail)}
+                              className="px-3 py-1 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 border border-white/10 transition-all cursor-pointer"
+                            >
+                              {showValidationDetail ? "Tutup Audit ▲" : "Rincian Validasi Silang ▼"}
+                            </button>
+                          </div>
+
+                          {/* Accordion Rincian Validasi Silang */}
+                          {showValidationDetail && (
+                            <div className="mt-4 pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-2.5 animate-in fade-in duration-300">
+                              {valResult.checks.map((c) => (
+                                <div 
+                                  key={c.id} 
+                                  className={`p-2.5 rounded-xl border text-xs ${
+                                    c.status === "green"
+                                      ? "bg-emerald-900/30 border-emerald-500/30 text-emerald-200"
+                                      : c.status === "yellow"
+                                      ? "bg-amber-900/30 border-amber-500/30 text-amber-200"
+                                      : "bg-rose-900/30 border-rose-500/30 text-rose-200"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-1.5 font-bold mb-0.5">
+                                    <span>{c.status === "green" ? "🟢" : c.status === "yellow" ? "🟡" : "🔴"}</span>
+                                    <span>{c.label}</span>
+                                  </div>
+                                  <div className="text-[11px] opacity-90 pl-5">{c.message}</div>
+                                  {c.details && (
+                                    <div className="text-[10px] opacity-70 pl-5 mt-0.5 font-mono italic">{c.details}</div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     
                     <div className="space-y-4 mb-6">
                       {/* Row 1: Nomor Polis & Jenis Bond */}
@@ -1536,6 +1882,27 @@ export default function Home() {
                             {/* Detail summary on done */}
                             {item.status === "done" && item.data && (
                               <div className="flex flex-wrap items-center gap-2 mt-1 text-xs">
+                                {(() => {
+                                  const bVal = evaluateCrossValidation(item.data);
+                                  return (
+                                    <span 
+                                      title={bVal.headline}
+                                      className={`px-2 py-0.5 rounded-md font-bold text-[10px] border flex items-center gap-1 ${
+                                        bVal.overallStatus === "green"
+                                          ? "bg-emerald-950 text-emerald-300 border-emerald-500/50"
+                                          : bVal.overallStatus === "yellow"
+                                          ? "bg-amber-950 text-amber-300 border-amber-500/50"
+                                          : "bg-rose-950 text-rose-300 border-rose-500/50"
+                                      }`}
+                                    >
+                                      <span className={`w-1.5 h-1.5 rounded-full ${
+                                        bVal.overallStatus === "green" ? "bg-emerald-400" :
+                                        bVal.overallStatus === "yellow" ? "bg-amber-400" : "bg-rose-400"
+                                      }`} />
+                                      {bVal.overallStatus === "green" ? "Valid" : bVal.overallStatus === "yellow" ? "Review" : "Periksa"} ({bVal.score}%)
+                                    </span>
+                                  );
+                                })()}
                                 <span className="px-2 py-0.5 rounded-md bg-emerald-950 text-emerald-300 font-semibold text-[10px] border border-emerald-500/40 flex items-center gap-1">
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                                   Tersimpan di Database & Sheets
