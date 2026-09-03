@@ -541,6 +541,7 @@ export default function Home() {
       status: "green" | "yellow" | "red";
       message: string;
       details?: string;
+      highlightTarget?: string;
     }[] = [];
 
     // 1. Uji Silang Tanggal vs Durasi Hari HK
@@ -548,6 +549,7 @@ export default function Home() {
     const tglAkhirStr = String(doc.tgl_akhir || "").trim();
     const rawDurasi = String(doc.durasi_hk || "").replace(/\D/g, "");
     const durasiHk = rawDurasi ? parseInt(rawDurasi, 10) : 0;
+    const dateHighlight = tglAwalStr && tglAwalStr !== "-" ? tglAwalStr : doc.masa_berlaku;
 
     const parseDateHelper = (dStr: string): Date | null => {
       if (!dStr || dStr === "-") return null;
@@ -574,7 +576,8 @@ export default function Home() {
           label: "Uji Rentang Tanggal",
           status: "red",
           message: "Tanggal Awal lebih besar dari Tanggal Akhir!",
-          details: `${tglAwalStr} s/d ${tglAkhirStr}`
+          details: `${tglAwalStr} s/d ${tglAkhirStr}`,
+          highlightTarget: dateHighlight
         });
       } else {
         const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
@@ -585,7 +588,8 @@ export default function Home() {
               label: "Uji Tanggal & Durasi HK",
               status: "green",
               message: `Cocok Sempurna (${durasiHk} Hari sesuai rentang ${diffDays} hari kalender)`,
-              details: `${tglAwalStr} s/d ${tglAkhirStr}`
+              details: `${tglAwalStr} s/d ${tglAkhirStr}`,
+              highlightTarget: dateHighlight
             });
           } else if (Math.abs(durasiHk - diffDays) <= 4) {
             checks.push({
@@ -593,7 +597,8 @@ export default function Home() {
               label: "Uji Tanggal & Durasi HK",
               status: "yellow",
               message: `Tercatat ${durasiHk} HK, selisih kalender ${diffDays} hari (Toleransi hari kerja)`,
-              details: `Selisih wajar antara perhitungan hari kalender vs hari kerja dinas`
+              details: `Selisih wajar antara perhitungan hari kalender vs hari kerja dinas`,
+              highlightTarget: dateHighlight
             });
           } else {
             checks.push({
@@ -601,7 +606,8 @@ export default function Home() {
               label: "Uji Tanggal & Durasi HK",
               status: "red",
               message: `Selisih Signifikan: Tertulis ${durasiHk} HK tapi rentang tanggal ${diffDays} hari!`,
-              details: `Mohon periksa kembali tanggal awal atau tanggal akhir`
+              details: `Mohon periksa kembali tanggal awal atau tanggal akhir`,
+              highlightTarget: dateHighlight
             });
           }
         } else {
@@ -609,7 +615,8 @@ export default function Home() {
             id: "date_vs_duration",
             label: "Durasi Waktu",
             status: "yellow",
-            message: `Rentang ${diffDays} hari kalender (Durasi HK tidak tertera angka pasti)`
+            message: `Rentang ${diffDays} hari kalender (Durasi HK tidak tertera angka pasti)`,
+            highlightTarget: dateHighlight
           });
         }
       }
@@ -618,14 +625,18 @@ export default function Home() {
         id: "date_vs_duration",
         label: "Uji Rentang Tanggal",
         status: "yellow",
-        message: "Tanggal awal atau akhir belum terisi lengkap"
+        message: "Tanggal awal atau akhir belum terisi lengkap",
+        highlightTarget: dateHighlight
       });
     }
 
     // 2. Uji Silang Nilai Angka vs Terbilang
     const nilaiStr = String(doc.nilai_jaminan || doc.nilai_proyek || "").trim();
     const teksAsli = String(doc.teks_asli || doc.teks_dokumen || "").toLowerCase();
-    const cleanDigits = nilaiStr.replace(/[^\d]/g, "");
+    
+    // Pisahkan desimal/sen sebelum menghitung angka utama (misal: "Rp 14.945.040,00" -> ambil "14.945.040")
+    const mainAmountStr = nilaiStr.split(",")[0].replace(/\.00$/, "");
+    const cleanDigits = mainAmountStr.replace(/[^\d]/g, "");
 
     if (cleanDigits && cleanDigits.length >= 6) {
       const numVal = parseInt(cleanDigits, 10);
@@ -639,14 +650,16 @@ export default function Home() {
             label: "Uji Nominal vs Terbilang",
             status: "green",
             message: `Nominal skala Miliar (${nilaiStr}) terkonfirmasi pada kalimat terbilang dokumen`,
-            details: `Kata 'Miliar' dan angka bersesuaian pada naskah asli`
+            details: `Kata 'Miliar' dan angka bersesuaian pada naskah asli`,
+            highlightTarget: nilaiStr
           });
         } else {
           checks.push({
             id: "nominal_cross",
             label: "Uji Nominal vs Terbilang",
             status: "yellow",
-            message: `Nominal skala Miliar (${nilaiStr}), pastikan terbilang di surat fisik sesuai`
+            message: `Nominal skala Miliar (${nilaiStr}), pastikan terbilang di surat fisik sesuai`,
+            highlightTarget: nilaiStr
           });
         }
       } else if (numVal >= 1_000_000) {
@@ -656,14 +669,16 @@ export default function Home() {
             label: "Uji Nominal vs Terbilang",
             status: "green",
             message: `Nominal skala Juta (${nilaiStr}) terkonfirmasi pada kalimat terbilang dokumen`,
-            details: `Kata 'Juta' dan angka bersesuaian pada naskah asli`
+            details: `Kata 'Juta' dan angka bersesuaian pada naskah asli`,
+            highlightTarget: nilaiStr
           });
         } else {
           checks.push({
             id: "nominal_cross",
             label: "Uji Nominal vs Terbilang",
             status: "yellow",
-            message: `Nominal ${nilaiStr} terdeteksi, kalimat terbilang tertutup cap atau belum terbaca`
+            message: `Nominal ${nilaiStr} terdeteksi, kalimat terbilang tertutup cap atau belum terbaca`,
+            highlightTarget: nilaiStr
           });
         }
       } else {
@@ -671,7 +686,8 @@ export default function Home() {
           id: "nominal_cross",
           label: "Nominal Jaminan",
           status: "green",
-          message: `Nilai jaminan: ${nilaiStr}`
+          message: `Nilai jaminan: ${nilaiStr}`,
+          highlightTarget: nilaiStr
         });
       }
     } else if (!nilaiStr || nilaiStr === "-") {
@@ -686,7 +702,8 @@ export default function Home() {
         id: "nominal_cross",
         label: "Nominal Jaminan",
         status: "yellow",
-        message: `Nilai jaminan: ${nilaiStr} (Format angka perlu ditinjau)`
+        message: `Nilai jaminan: ${nilaiStr} (Format angka perlu ditinjau)`,
+        highlightTarget: nilaiStr
       });
     }
 
@@ -705,14 +722,16 @@ export default function Home() {
         label: "Status Legalitas Nomor Dokumen",
         status: "yellow",
         message: `Formulir Permohonan (Nomor Dasar SPPBJ: ${noJaminan})`,
-        details: "Dokumen ini terdeteksi sebagai formulir pengajuan; nomor sertifikat polis resmi belum dicetak"
+        details: "Dokumen ini terdeteksi sebagai formulir pengajuan; nomor sertifikat polis resmi belum dicetak",
+        highlightTarget: noJaminan
       });
     } else {
       checks.push({
         id: "doc_number",
         label: "Nomor Polis Resmi",
         status: "green",
-        message: `Nomor Polis Resmi Terverifikasi: ${noJaminan}`
+        message: `Nomor Polis Resmi Terverifikasi: ${noJaminan}`,
+        highlightTarget: noJaminan
       });
     }
 
@@ -731,21 +750,24 @@ export default function Home() {
         id: "entities_check",
         label: "Kelengkapan Pihak Penjaminan",
         status: "green",
-        message: "Seluruh entitas (Principal, Obligee, & Nama Proyek) lengkap terisi"
+        message: "Seluruh entitas (Principal, Obligee, & Nama Proyek) lengkap terisi",
+        highlightTarget: principal
       });
     } else if (missingEntities.length === 1) {
       checks.push({
         id: "entities_check",
         label: "Kelengkapan Pihak Penjaminan",
         status: "yellow",
-        message: `Ada 1 informasi belum lengkap: ${missingEntities.join(", ")}`
+        message: `Ada 1 informasi belum lengkap: ${missingEntities.join(", ")}`,
+        highlightTarget: principal !== "-" ? principal : undefined
       });
     } else {
       checks.push({
         id: "entities_check",
         label: "Kelengkapan Pihak Penjaminan",
         status: "red",
-        message: `Entitas penting belum lengkap: ${missingEntities.join(", ")}`
+        message: `Entitas penting belum lengkap: ${missingEntities.join(", ")}`,
+        highlightTarget: principal !== "-" ? principal : undefined
       });
     }
 
@@ -1385,12 +1407,19 @@ export default function Home() {
                                 return (
                                   <div 
                                     key={c.id} 
-                                    className={`p-4 rounded-xl border bg-slate-950/70 transition-all ${
+                                    onClick={() => {
+                                      if (c.highlightTarget) {
+                                        highlightInSource(c.highlightTarget);
+                                        toast.success(`Menyorot ${c.label} di naskah dokumen`);
+                                      }
+                                    }}
+                                    title="Klik untuk menyorot bagian ini di naskah dokumen asli"
+                                    className={`p-4 rounded-xl border bg-slate-950/70 transition-all cursor-pointer group hover:scale-[1.01] hover:bg-slate-900/90 ${
                                       checkGreen
-                                        ? "border-emerald-500/30 shadow-sm"
+                                        ? "border-emerald-500/30 hover:border-emerald-400 shadow-sm"
                                         : checkYellow
-                                        ? "border-amber-500/30 shadow-sm"
-                                        : "border-rose-500/40 shadow-sm"
+                                        ? "border-amber-500/30 hover:border-amber-400 shadow-sm"
+                                        : "border-rose-500/40 hover:border-rose-400 shadow-sm"
                                     }`}
                                   >
                                     <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -1398,7 +1427,7 @@ export default function Home() {
                                         <span className={`w-2 h-2 rounded-full ${
                                           checkGreen ? "bg-emerald-400" : checkYellow ? "bg-amber-400" : "bg-rose-400"
                                         }`} />
-                                        <span className="text-sm font-bold text-white tracking-wide">
+                                        <span className="text-sm font-bold text-white tracking-wide group-hover:text-sky-300 transition-colors">
                                           {c.label}
                                         </span>
                                       </div>
@@ -1420,6 +1449,13 @@ export default function Home() {
                                         {c.details}
                                       </div>
                                     )}
+                                    <div className="mt-2.5 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400 group-hover:text-sky-300 transition-colors">
+                                      <span className="flex items-center gap-1.5 font-medium">
+                                        <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                        <span>Klik kartu untuk sorot di teks asli</span>
+                                      </span>
+                                      <span className="text-slate-500 group-hover:text-sky-400 font-mono">↗</span>
+                                    </div>
                                   </div>
                                 );
                               })}
