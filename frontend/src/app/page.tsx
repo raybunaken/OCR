@@ -754,16 +754,16 @@ export default function Home() {
 
     let overallStatus: "green" | "yellow" | "red" = "green";
     let score = 100;
-    let headline = "✓ Dokumen 100% Terverifikasi Valid (Aman)";
+    let headline = "Status Dokumen: Terverifikasi Valid dan Aman";
 
     if (redCount > 0) {
       overallStatus = "red";
       score = Math.max(35, 100 - (redCount * 30) - (yellowCount * 10));
-      headline = "⚠️ Perhatian Khusus: Ditemukan Ketidakcocokan";
+      headline = "Perhatian: Ditemukan Ketidakcocokan Data";
     } else if (yellowCount > 0) {
       overallStatus = "yellow";
       score = Math.max(65, 100 - (yellowCount * 12));
-      headline = "ℹ️ Dokumen Aman, Perlu Tinjauan Ringan";
+      headline = "Pemberitahuan: Dokumen Memerlukan Tinjauan";
     }
 
     return {
@@ -1096,26 +1096,27 @@ export default function Home() {
                       <tr key={doc.id} className="hover:bg-slate-800/30 transition-colors">
                         <td className="p-4 text-slate-300">{doc.created_at?.substring(0,10)}</td>
                         <td className="p-4 font-medium text-white">
-                          <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2.5 flex-wrap">
                             <span>{doc.nama_klien}</span>
                             {(() => {
                               const rowVal = evaluateCrossValidation(doc);
+                              const isG = rowVal.overallStatus === "green";
+                              const isY = rowVal.overallStatus === "yellow";
                               return (
                                 <span 
-                                  title={`${rowVal.headline} (Skor: ${rowVal.score}%)`}
-                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
-                                    rowVal.overallStatus === "green" 
-                                      ? "bg-emerald-950/80 text-emerald-300 border-emerald-500/40" 
-                                      : rowVal.overallStatus === "yellow"
-                                      ? "bg-amber-950/80 text-amber-300 border-amber-500/40"
-                                      : "bg-rose-950/80 text-rose-300 border-rose-500/40"
+                                  title={`${rowVal.headline} (Akurasi: ${rowVal.score}%)`}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border shrink-0 ${
+                                    isG 
+                                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" 
+                                      : isY
+                                      ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                      : "bg-rose-500/10 text-rose-400 border-rose-500/30"
                                   }`}
                                 >
                                   <span className={`w-1.5 h-1.5 rounded-full ${
-                                    rowVal.overallStatus === "green" ? "bg-emerald-400" :
-                                    rowVal.overallStatus === "yellow" ? "bg-amber-400" : "bg-rose-400"
+                                    isG ? "bg-emerald-400" : isY ? "bg-amber-400" : "bg-rose-400"
                                   }`} />
-                                  {rowVal.overallStatus === "green" ? "Valid" : rowVal.overallStatus === "yellow" ? "Review" : "Periksa"}
+                                  {isG ? "Terverifikasi" : isY ? "Tinjau" : "Periksa"}
                                 </span>
                               );
                             })()}
@@ -1313,71 +1314,115 @@ export default function Home() {
                       </div>
                     </div>
                     
-                    {/* 🚦 Traffic Light System: AI Cross-Validation Banner */}
+                    {/* 🛡️ Traffic Light System: AI Cross-Validation Banner (Premium Executive Design) */}
                     {(() => {
                       const valResult = evaluateCrossValidation(extractedData);
+                      const isGreen = valResult.overallStatus === "green";
+                      const isYellow = valResult.overallStatus === "yellow";
+                      const isRed = valResult.overallStatus === "red";
+
                       return (
-                        <div className={`p-4 rounded-2xl border transition-all mb-6 ${
-                          valResult.overallStatus === "green"
-                            ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-200"
-                            : valResult.overallStatus === "yellow"
-                            ? "bg-amber-950/40 border-amber-500/40 text-amber-200"
-                            : "bg-rose-950/40 border-rose-500/40 text-rose-200"
+                        <div className={`p-5 rounded-2xl border transition-all mb-6 shadow-xl ${
+                          isGreen
+                            ? "bg-slate-900/90 border-emerald-500/50 shadow-emerald-950/20"
+                            : isYellow
+                            ? "bg-slate-900/90 border-amber-500/50 shadow-amber-950/20"
+                            : "bg-slate-900/90 border-rose-500/50 shadow-rose-950/20"
                         }`}>
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                              <span className={`w-3.5 h-3.5 rounded-full shrink-0 animate-pulse ${
-                                valResult.overallStatus === "green"
-                                  ? "bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]"
-                                  : valResult.overallStatus === "yellow"
-                                  ? "bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.9)]"
-                                  : "bg-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.9)]"
-                              }`} />
+                          <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-start sm:items-center gap-3.5">
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                                isGreen 
+                                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" 
+                                  : isYellow
+                                  ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                                  : "bg-rose-500/10 border-rose-500/30 text-rose-400"
+                              }`}>
+                                {isGreen ? (
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" /></svg>
+                                ) : isYellow ? (
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                ) : (
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                )}
+                              </div>
                               <div>
-                                <div className="text-sm font-bold flex items-center gap-2 flex-wrap">
-                                  <span>{valResult.headline}</span>
-                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 border border-white/10 font-mono tracking-wide">
-                                    Skor Validasi: {valResult.score}%
+                                <div className="flex items-center gap-2.5 flex-wrap">
+                                  <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                                    {valResult.headline}
+                                  </h3>
+                                  <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
+                                    isGreen
+                                      ? "bg-emerald-950 text-emerald-300 border-emerald-500/40"
+                                      : isYellow
+                                      ? "bg-amber-950 text-amber-300 border-amber-500/40"
+                                      : "bg-rose-950 text-rose-300 border-rose-500/40"
+                                  }`}>
+                                    Akurasi: {valResult.score}%
                                   </span>
                                 </div>
-                                <div className="text-xs opacity-75 mt-0.5">
-                                  Satpam AI menguji silang nilai uang, durasi hari kalender, dan nomor dokumen.
-                                </div>
+                                <p className="text-sm text-slate-300 mt-0.5 leading-relaxed">
+                                  Sistem audit AI telah menguji silang nilai nominal, rentang tanggal kalender, dan keabsahan nomor dokumen.
+                                </p>
                               </div>
                             </div>
                             <button
                               type="button"
                               onClick={() => setShowValidationDetail(!showValidationDetail)}
-                              className="px-3 py-1 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 border border-white/10 transition-all cursor-pointer"
+                              className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 transition-all cursor-pointer shadow-sm"
                             >
-                              {showValidationDetail ? "Tutup Audit ▲" : "Rincian Validasi Silang ▼"}
+                              {showValidationDetail ? "Tutup Rincian Audit" : "Lihat Rincian Validasi Silang"}
                             </button>
                           </div>
 
                           {/* Accordion Rincian Validasi Silang */}
                           {showValidationDetail && (
-                            <div className="mt-4 pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-2.5 animate-in fade-in duration-300">
-                              {valResult.checks.map((c) => (
-                                <div 
-                                  key={c.id} 
-                                  className={`p-2.5 rounded-xl border text-xs ${
-                                    c.status === "green"
-                                      ? "bg-emerald-900/30 border-emerald-500/30 text-emerald-200"
-                                      : c.status === "yellow"
-                                      ? "bg-amber-900/30 border-amber-500/30 text-amber-200"
-                                      : "bg-rose-900/30 border-rose-500/30 text-rose-200"
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-1.5 font-bold mb-0.5">
-                                    <span>{c.status === "green" ? "🟢" : c.status === "yellow" ? "🟡" : "🔴"}</span>
-                                    <span>{c.label}</span>
+                            <div className="mt-5 pt-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-3.5 animate-in fade-in duration-300">
+                              {valResult.checks.map((c) => {
+                                const checkGreen = c.status === "green";
+                                const checkYellow = c.status === "yellow";
+
+                                return (
+                                  <div 
+                                    key={c.id} 
+                                    className={`p-4 rounded-xl border bg-slate-950/70 transition-all ${
+                                      checkGreen
+                                        ? "border-emerald-500/30 shadow-sm"
+                                        : checkYellow
+                                        ? "border-amber-500/30 shadow-sm"
+                                        : "border-rose-500/40 shadow-sm"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className={`w-2 h-2 rounded-full ${
+                                          checkGreen ? "bg-emerald-400" : checkYellow ? "bg-amber-400" : "bg-rose-400"
+                                        }`} />
+                                        <span className="text-sm font-bold text-white tracking-wide">
+                                          {c.label}
+                                        </span>
+                                      </div>
+                                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
+                                        checkGreen
+                                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                          : checkYellow
+                                          ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                          : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                                      }`}>
+                                        {checkGreen ? "Sesuai" : checkYellow ? "Tinjau" : "Selisih"}
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-slate-200 font-medium leading-relaxed">
+                                      {c.message}
+                                    </div>
+                                    {c.details && (
+                                      <div className="text-xs text-slate-400 mt-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800/80 font-mono">
+                                        {c.details}
+                                      </div>
+                                    )}
                                   </div>
-                                  <div className="text-[11px] opacity-90 pl-5">{c.message}</div>
-                                  {c.details && (
-                                    <div className="text-[10px] opacity-70 pl-5 mt-0.5 font-mono italic">{c.details}</div>
-                                  )}
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -1884,22 +1929,23 @@ export default function Home() {
                               <div className="flex flex-wrap items-center gap-2 mt-1 text-xs">
                                 {(() => {
                                   const bVal = evaluateCrossValidation(item.data);
+                                  const isG = bVal.overallStatus === "green";
+                                  const isY = bVal.overallStatus === "yellow";
                                   return (
                                     <span 
                                       title={bVal.headline}
-                                      className={`px-2 py-0.5 rounded-md font-bold text-[10px] border flex items-center gap-1 ${
-                                        bVal.overallStatus === "green"
-                                          ? "bg-emerald-950 text-emerald-300 border-emerald-500/50"
-                                          : bVal.overallStatus === "yellow"
-                                          ? "bg-amber-950 text-amber-300 border-amber-500/50"
-                                          : "bg-rose-950 text-rose-300 border-rose-500/50"
+                                      className={`px-2.5 py-0.5 rounded-md font-semibold text-xs border flex items-center gap-1.5 ${
+                                        isG
+                                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                          : isY
+                                          ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                          : "bg-rose-500/10 text-rose-400 border-rose-500/30"
                                       }`}
                                     >
                                       <span className={`w-1.5 h-1.5 rounded-full ${
-                                        bVal.overallStatus === "green" ? "bg-emerald-400" :
-                                        bVal.overallStatus === "yellow" ? "bg-amber-400" : "bg-rose-400"
+                                        isG ? "bg-emerald-400" : isY ? "bg-amber-400" : "bg-rose-400"
                                       }`} />
-                                      {bVal.overallStatus === "green" ? "Valid" : bVal.overallStatus === "yellow" ? "Review" : "Periksa"} ({bVal.score}%)
+                                      {isG ? "Terverifikasi" : isY ? "Tinjau" : "Periksa"} ({bVal.score}%)
                                     </span>
                                   );
                                 })()}
