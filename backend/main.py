@@ -6,6 +6,7 @@ import base64
 import fitz
 import datetime
 import requests
+import threading
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
@@ -90,14 +91,17 @@ def init_db():
     conn.close()
 
 def sync_to_google_sheets(payload):
-    webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbyqR2iO8lRtSNnJQWWzUXqHAqSpLYF5w2E5I10E-LPsViQpVUBymdEMRzjG_BnIRcqX8g/exec")
-    if not webhook_url:
-        return
-    try:
-        res = requests.post(webhook_url, json=payload, timeout=10)
-        print("GOOGLE SHEETS SYNC STATUS:", res.status_code, res.text[:200])
-    except Exception as e:
-        print("GOOGLE SHEETS SYNC NOTICE:", e)
+    def _worker():
+        webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbyqR2iO8lRtSNnJQWWzUXqHAqSpLYF5w2E5I10E-LPsViQpVUBymdEMRzjG_BnIRcqX8g/exec")
+        if not webhook_url:
+            return
+        try:
+            res = requests.post(webhook_url, json=payload, timeout=10)
+            print("GOOGLE SHEETS SYNC STATUS:", res.status_code, res.text[:200])
+        except Exception as e:
+            print("GOOGLE SHEETS SYNC NOTICE:", e)
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
