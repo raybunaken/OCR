@@ -17,6 +17,7 @@ export default function Home() {
   const [uploadMode, setUploadMode] = useState<"single" | "batch">("single");
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [extractedData, setExtractedData] = useState<any>(null);
   const [batchFiles, setBatchFiles] = useState<BatchFileItem[]>([]);
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
@@ -395,7 +396,8 @@ export default function Home() {
   };
 
   const handleSave = async () => {
-    if (!extractedData) return;
+    if (!extractedData || isSaving) return;
+    setIsSaving(true);
     
     const payload = {
       nama_klien: extractedData.principal || "-",
@@ -438,6 +440,8 @@ export default function Home() {
       setActiveTab("dashboard");
     } catch (err) {
       toast.error("Gagal menyimpan ke database.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1205,11 +1209,24 @@ export default function Home() {
 
                     {/* Bottom Buttons */}
                     <div className="flex gap-3">
-                      <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-lg shadow-emerald-500/25 transition-all flex-1 cursor-pointer flex items-center justify-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                        </svg>
-                        Simpan ke Database & Google Sheets
+                      <button 
+                        onClick={handleSave} 
+                        disabled={isSaving}
+                        className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-lg shadow-emerald-500/25 transition-all flex-1 cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        {isSaving ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            <span>Menyimpan...</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                            </svg>
+                            <span>Simpan ke Database & Google Sheets</span>
+                          </>
+                        )}
                       </button>
                       {extractedData.id && (
                         <button onClick={() => fetchAuditLogs(extractedData.id)} className="bg-slate-800 hover:bg-slate-700 text-sky-400 px-4 py-3 rounded-xl font-semibold text-xs border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer">
