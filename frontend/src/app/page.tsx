@@ -13,7 +13,7 @@ interface BatchFileItem {
 }
 
 export default function Home() {
-  const APP_ENV = "production";
+  const APP_ENV: string = "production";
   const [activeTab, setActiveTab] = useState("dashboard");
   const [uploadMode, setUploadMode] = useState<"single" | "batch">("single");
   const [file, setFile] = useState<File | null>(null);
