@@ -362,6 +362,21 @@ def rapikan_teks(teks_mentah):
         if dur_match:
             result_data["durasi_hk"] = dur_match.group(1)
 
+    # 4. Jika nomor_jaminan kosong/'-', cari nomor SPPBJ / Surat / Jaminan / Permohonan
+    if not result_data.get("nomor_jaminan") or result_data["nomor_jaminan"] == "-":
+        no_patterns = [
+            r'(?:SPPBJ|Polis|Jaminan|Sertifikat|Kontrak|Permohonan)\s*(?:No\.?|Nomor)\s*[:\.]?\s*([A-Za-z0-9\.\/\-]{6,})',
+            r'(?:No\.?|Nomor)\s*(?:SPPBJ|Polis|Jaminan|Sertifikat|Kontrak|Permohonan)\s*[:\.]?\s*([A-Za-z0-9\.\/\-]{6,})',
+            r'SPPBJ\s*No\.?\s*[:\.]?\s*([A-Za-z0-9\.\/\-]{6,})'
+        ]
+        for pat in no_patterns:
+            m = re.search(pat, teks_mentah, re.IGNORECASE)
+            if m:
+                val = m.group(1).strip().strip('.')
+                if not re.match(r'^\d{1,2}/\d{1,2}/\d{4}$', val):
+                    result_data["nomor_jaminan"] = val
+                    break
+
     return result_data
 
 
