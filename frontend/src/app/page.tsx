@@ -34,6 +34,7 @@ export default function Home() {
   const [highlightedWord, setHighlightedWord] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
   const [showValidationDetail, setShowValidationDetail] = useState(false);
+  const [resolvedChecks, setResolvedChecks] = useState<Record<string, boolean>>({});
 
   const highlightInSource = (textToFind: string) => {
     if (!textToFind || textToFind === "-") {
@@ -525,7 +526,7 @@ export default function Home() {
     return null;
   };
 
-  const evaluateCrossValidation = (doc: any) => {
+  const evaluateCrossValidation = (doc: any, overrides?: Record<string, boolean>) => {
     if (!doc) {
       return {
         overallStatus: "yellow" as const,
@@ -771,12 +772,32 @@ export default function Home() {
       });
     }
 
-    const redCount = checks.filter(c => c.status === "red").length;
-    const yellowCount = checks.filter(c => c.status === "yellow").length;
+    const activeChecks = checks.map(c => {
+      const isResolved = Boolean(overrides?.[c.id]);
+      if (isResolved) {
+        return { 
+          ...c, 
+          status: "green" as const, 
+          isResolved: true,
+          resolvedOriginalStatus: c.status
+        };
+      }
+      return { 
+        ...c, 
+        isResolved: false,
+        resolvedOriginalStatus: c.status
+      };
+    });
+
+    const redCount = activeChecks.filter(c => c.status === "red").length;
+    const yellowCount = activeChecks.filter(c => c.status === "yellow").length;
+    const hasResolved = activeChecks.some(c => c.isResolved);
 
     let overallStatus: "green" | "yellow" | "red" = "green";
     let score = 100;
-    let headline = "Status Dokumen: Terverifikasi Valid dan Aman";
+    let headline = hasResolved 
+      ? "Status Dokumen: Terverifikasi Valid (Disetujui Manual)"
+      : "Status Dokumen: Terverifikasi Valid dan Aman";
 
     if (redCount > 0) {
       overallStatus = "red";
@@ -792,7 +813,7 @@ export default function Home() {
       overallStatus,
       score,
       headline,
-      checks
+      checks: activeChecks
     };
   };
 
@@ -1124,22 +1145,50 @@ export default function Home() {
                               const rowVal = evaluateCrossValidation(doc);
                               const isG = rowVal.overallStatus === "green";
                               const isY = rowVal.overallStatus === "yellow";
+
+                              const handleCopyAuditNote = (e: React.MouseEvent) => {
+                                e.stopPropagation();
+                                const nonGreen = rowVal.checks.filter((c: any) => c.status !== "green");
+                                const catatans = nonGreen.length > 0
+                                  ? nonGreen.map((c: any) => `• ${c.label}: ${c.message}`).join("\n")
+                                  : "• Seluruh data terverifikasi cocok dan valid.";
+                                
+                                const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${doc.nama_klien || "-"}\nNo. Polis: ${doc.nomor_identitas || "-"}\nStatus: ${isG ? "Terverifikasi Valid" : isY ? "Perlu Tinjauan Ringan" : "Perhatian Khusus (Ada Selisih)"} (Akurasi: ${rowVal.score}%)\n\nRincian Catatan:\n${catatans}`;
+                                
+                                navigator.clipboard.writeText(noteText);
+                                toast.success("Catatan audit disalin ke clipboard!");
+                              };
+
                               return (
-                                <span 
-                                  title={`${rowVal.headline} (Akurasi: ${rowVal.score}%)`}
-                                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border shrink-0 ${
-                                    isG 
-                                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" 
-                                      : isY
-                                      ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                                      : "bg-rose-500/10 text-rose-400 border-rose-500/30"
-                                  }`}
-                                >
-                                  <span className={`w-1.5 h-1.5 rounded-full ${
-                                    isG ? "bg-emerald-400" : isY ? "bg-amber-400" : "bg-rose-400"
-                                  }`} />
-                                  {isG ? "Terverifikasi" : isY ? "Tinjau" : "Periksa"}
-                                </span>
+                                <div className="inline-flex items-center gap-1.5 shrink-0">
+                                  <span 
+                                    title={`${rowVal.headline} (Akurasi: ${rowVal.score}%)`}
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border shrink-0 ${
+                                      isG 
+                                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" 
+                                        : isY
+                                        ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                        : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                                    }`}
+                                  >
+                                    <span className={`w-1.5 h-1.5 rounded-full ${
+                                      isG ? "bg-emerald-400" : isY ? "bg-amber-400" : "bg-rose-400"
+                                    }`} />
+                                    {isG ? "Terverifikasi" : isY ? "Tinjau" : "Periksa"}
+                                  </span>
+
+                                  {!isG && (
+                                    <button
+                                      type="button"
+                                      onClick={handleCopyAuditNote}
+                                      title="Salin catatan audit untuk dikirim ke WhatsApp/Email"
+                                      className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                                    >
+                                      <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                      <span>Salin Catatan</span>
+                                    </button>
+                                  )}
+                                </div>
                               );
                             })()}
                           </div>
@@ -1338,7 +1387,7 @@ export default function Home() {
                     
                     {/* 🛡️ Traffic Light System: AI Cross-Validation Banner (Premium Executive Design) */}
                     {(() => {
-                      const valResult = evaluateCrossValidation(extractedData);
+                      const valResult = evaluateCrossValidation(extractedData, resolvedChecks);
                       const isGreen = valResult.overallStatus === "green";
                       const isYellow = valResult.overallStatus === "yellow";
                       const isRed = valResult.overallStatus === "red";
@@ -1400,9 +1449,10 @@ export default function Home() {
                           {/* Accordion Rincian Validasi Silang */}
                           {showValidationDetail && (
                             <div className="mt-5 pt-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-3.5 animate-in fade-in duration-300">
-                              {valResult.checks.map((c) => {
+                              {valResult.checks.map((c: any) => {
                                 const checkGreen = c.status === "green";
                                 const checkYellow = c.status === "yellow";
+                                const isResolved = Boolean(c.isResolved);
 
                                 return (
                                   <div 
@@ -1415,31 +1465,63 @@ export default function Home() {
                                     }}
                                     title="Klik untuk menyorot bagian ini di naskah dokumen asli"
                                     className={`p-4 rounded-xl border bg-slate-950/70 transition-all cursor-pointer group hover:scale-[1.01] hover:bg-slate-900/90 ${
-                                      checkGreen
+                                      isResolved
+                                        ? "border-sky-500/40 bg-sky-950/20 hover:border-sky-400 shadow-sm"
+                                        : checkGreen
                                         ? "border-emerald-500/30 hover:border-emerald-400 shadow-sm"
                                         : checkYellow
                                         ? "border-amber-500/30 hover:border-amber-400 shadow-sm"
                                         : "border-rose-500/40 hover:border-rose-400 shadow-sm"
                                     }`}
                                   >
-                                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                                    <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
                                       <div className="flex items-center gap-2">
                                         <span className={`w-2 h-2 rounded-full ${
-                                          checkGreen ? "bg-emerald-400" : checkYellow ? "bg-amber-400" : "bg-rose-400"
+                                          isResolved ? "bg-sky-400" : checkGreen ? "bg-emerald-400" : checkYellow ? "bg-amber-400" : "bg-rose-400"
                                         }`} />
                                         <span className="text-sm font-bold text-white tracking-wide group-hover:text-sky-300 transition-colors">
                                           {c.label}
                                         </span>
                                       </div>
-                                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
-                                        checkGreen
-                                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                                          : checkYellow
-                                          ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                                          : "bg-rose-500/10 text-rose-400 border-rose-500/30"
-                                      }`}>
-                                        {checkGreen ? "Sesuai" : checkYellow ? "Tinjau" : "Selisih"}
-                                      </span>
+                                      <div className="flex items-center gap-1.5">
+                                        {(c.resolvedOriginalStatus !== "green" || isResolved) && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              const checkId = String(c.id);
+                                              setResolvedChecks(prev => {
+                                                const currentVal = Boolean(prev[checkId]);
+                                                const next: Record<string, boolean> = { ...prev, [checkId]: !currentVal };
+                                                if (!currentVal) {
+                                                  toast.success(`${c.label} disetujui manual`);
+                                                } else {
+                                                  toast.info(`Persetujuan manual ${c.label} dibatalkan`);
+                                                }
+                                                return next;
+                                              });
+                                            }}
+                                            className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border transition-all cursor-pointer ${
+                                              isResolved
+                                                ? "bg-sky-950 text-sky-300 border-sky-600/60 hover:bg-sky-900"
+                                                : "bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700"
+                                            }`}
+                                          >
+                                            {isResolved ? "Batalkan Setujui" : "Setujui Manual"}
+                                          </button>
+                                        )}
+                                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
+                                          isResolved
+                                            ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                                            : checkGreen
+                                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                            : checkYellow
+                                            ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                            : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                                        }`}>
+                                          {isResolved ? "Disetujui Manual" : checkGreen ? "Sesuai" : checkYellow ? "Tinjau" : "Selisih"}
+                                        </span>
+                                      </div>
                                     </div>
                                     <div className="text-sm text-slate-200 font-medium leading-relaxed">
                                       {c.message}

@@ -557,7 +557,8 @@ def save_document(doc: DocumentUpdate):
         "tgl_terbit": doc.tgl_terbit or doc.tgl_awal or "-",
         "tgl_awal": doc.tgl_awal or "-",
         "tgl_akhir": doc.tgl_akhir or "-",
-        "durasi_hk": doc.durasi_hk or "-"
+        "durasi_hk": doc.durasi_hk or "-",
+        "waktu_input": datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     }
     sync_to_google_sheets(sheets_payload)
 
@@ -680,7 +681,8 @@ def update_document(doc_id: int, doc: DocumentUpdate):
         "tgl_terbit": doc.tgl_terbit or "-",
         "tgl_awal": doc.tgl_awal or "-",
         "tgl_akhir": doc.tgl_akhir or "-",
-        "durasi_hk": doc.durasi_hk or "-"
+        "durasi_hk": doc.durasi_hk or "-",
+        "waktu_input": datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     }
     sync_to_google_sheets(sheets_update_payload)
 
