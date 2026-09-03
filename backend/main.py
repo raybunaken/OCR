@@ -77,6 +77,7 @@ def init_db():
     cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_awal TEXT;")
     cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_akhir TEXT;")
     cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS durasi_hk TEXT;")
+    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS env TEXT DEFAULT 'production';")
     
     # Buat tabel audit_logs jika belum ada
     cursor.execute("""
@@ -135,6 +136,7 @@ class DocumentUpdate(BaseModel):
     tgl_awal: Optional[str] = ""
     tgl_akhir: Optional[str] = ""
     durasi_hk: Optional[str] = ""
+    env: Optional[str] = "production"
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -486,10 +488,13 @@ async def extract_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/documents")
-def get_documents():
+def get_documents(env: Optional[str] = "production"):
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("SELECT * FROM dokumen ORDER BY id DESC")
+    if env == "testing":
+        cursor.execute("SELECT * FROM dokumen WHERE env='testing' ORDER BY id DESC")
+    else:
+        cursor.execute("SELECT * FROM dokumen WHERE env='production' OR env IS NULL ORDER BY id DESC")
     docs = cursor.fetchall()
     conn.close()
     return [dict(ix) for ix in docs]
@@ -497,6 +502,7 @@ def get_documents():
 @app.post("/api/documents")
 def save_document(doc: DocumentUpdate):
     waktu_sekarang = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    doc_env = doc.env or "production"
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -504,14 +510,14 @@ def save_document(doc: DocumentUpdate):
             nama_klien, jenis_dokumen, nomor_identitas, nilai_proyek, 
             obligee, pekerjaan, masa_berlaku, teks_dokumen, 
             kode_jenis, tgl_terbit, tgl_awal, tgl_akhir, durasi_hk,
-            created_at, updated_at
+            created_at, updated_at, env
         ) 
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, 
         doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, 
         doc.kode_jenis, doc.tgl_terbit, doc.tgl_awal, doc.tgl_akhir, doc.durasi_hk,
-        waktu_sekarang, waktu_sekarang
+        waktu_sekarang, waktu_sekarang, doc_env
     ))
     conn.commit()
     conn.close()
@@ -519,6 +525,8 @@ def save_document(doc: DocumentUpdate):
     # Trigger Live Sync to Google Sheets
     sheets_payload = {
         "action": "INSERT",
+        "env": doc_env,
+        "sheet_name": "TESTING" if (doc_env == "testing") else "REGISTER SURETY BOND",
         "nomor_identitas": doc.nomor_identitas or "-",
         "no_polis": doc.nomor_identitas or "-",
         "kode_jenis": doc.kode_jenis or "PB",
@@ -553,10 +561,15 @@ def delete_document(doc_id: int):
         
         # Sinkronisasi HAPUS ke Google Sheets
         if doc:
+            doc_env = doc["env"] if "env" in doc.keys() and doc["env"] else "production"
             delete_payload = {
                 "action": "DELETE",
+                "env": doc_env,
+                "sheet_name": "TESTING" if (doc_env == "testing") else "REGISTER SURETY BOND",
                 "nomor_identitas": doc["nomor_identitas"],
+                "no_polis": doc["nomor_identitas"],
                 "nama_klien": doc["nama_klien"],
+                "principal": doc["nama_klien"],
                 "nilai_proyek": doc["nilai_proyek"]
             }
             sync_to_google_sheets(delete_payload)
@@ -631,8 +644,11 @@ def update_document(doc_id: int, doc: DocumentUpdate):
     conn.close()
 
     # 5. Sinkronisasi UPDATE ke Google Sheets
+    doc_env = doc.env or old_data_dict.get("env") or "production"
     sheets_update_payload = {
         "action": "UPDATE",
+        "env": doc_env,
+        "sheet_name": "TESTING" if (doc_env == "testing") else "REGISTER SURETY BOND",
         "old_nomor_identitas": old_data_dict.get("nomor_identitas"),
         "nomor_identitas": doc.nomor_identitas or "-",
         "no_polis": doc.nomor_identitas or "-",
