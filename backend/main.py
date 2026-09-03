@@ -533,11 +533,25 @@ def save_document(doc: DocumentUpdate):
 def delete_document(doc_id: int):
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cursor.execute("SELECT * FROM dokumen WHERE id=%s", (doc_id,))
+        doc = cursor.fetchone()
+        
         cursor.execute("DELETE FROM audit_logs WHERE doc_id=%s", (doc_id,))
         cursor.execute("DELETE FROM dokumen WHERE id=%s", (doc_id,))
         conn.commit()
         conn.close()
+        
+        # Sinkronisasi HAPUS ke Google Sheets
+        if doc:
+            delete_payload = {
+                "action": "DELETE",
+                "nomor_identitas": doc["nomor_identitas"],
+                "nama_klien": doc["nama_klien"],
+                "nilai_proyek": doc["nilai_proyek"]
+            }
+            sync_to_google_sheets(delete_payload)
+            
         return {"status": "success"}
     except Exception as e:
         print("ERROR DELETE:", e)
@@ -606,6 +620,24 @@ def update_document(doc_id: int, doc: DocumentUpdate):
     
     conn.commit()
     conn.close()
+
+    # 5. Sinkronisasi UPDATE ke Google Sheets
+    sheets_update_payload = {
+        "action": "UPDATE",
+        "old_nomor_identitas": old_data_dict.get("nomor_identitas"),
+        "nomor_identitas": doc.nomor_identitas or "-",
+        "kode_jenis": doc.kode_jenis or "PB",
+        "nama_klien": doc.nama_klien or "-",
+        "obligee": doc.obligee or "-",
+        "pekerjaan": doc.pekerjaan or "-",
+        "nilai_proyek": doc.nilai_proyek or "-",
+        "tgl_terbit": doc.tgl_terbit or "-",
+        "tgl_awal": doc.tgl_awal or "-",
+        "tgl_akhir": doc.tgl_akhir or "-",
+        "durasi_hk": doc.durasi_hk or "-"
+    }
+    sync_to_google_sheets(sheets_update_payload)
+
     return {"status": "success", "perubahan_dicatat": len(perubahan) > 0}
 
 @app.get("/api/documents/{doc_id}/logs")
