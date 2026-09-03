@@ -13,7 +13,7 @@ interface BatchFileItem {
 }
 
 export default function Home() {
-  const APP_ENV = "testing";
+  const APP_ENV = "production";
   const [activeTab, setActiveTab] = useState("dashboard");
   const [uploadMode, setUploadMode] = useState<"single" | "batch">("single");
   const [file, setFile] = useState<File | null>(null);
@@ -620,12 +620,18 @@ export default function Home() {
             <h1 className="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-600 tracking-tight">
               Ekstraktor Asuransi AI
             </h1>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-              🧪 Testing Lab (Tab: TESTING)
-            </span>
+            {APP_ENV === "testing" && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                🧪 Testing Lab (Tab: TESTING)
+              </span>
+            )}
           </div>
-          <p className="text-slate-400 mt-2 text-sm sm:text-base">Laboratorium Uji Coba Dokumen Asuransi (Data Terisolasi)</p>
+          <p className="text-slate-400 mt-2 text-sm sm:text-base">
+            {APP_ENV === "testing" 
+              ? "Laboratorium Uji Coba Dokumen Asuransi (Data Terisolasi)" 
+              : "Sistem Manajemen Dokumen Asuransi Berbasis AI"}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
           <button 
