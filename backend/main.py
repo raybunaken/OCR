@@ -528,12 +528,14 @@ def save_document(doc: DocumentUpdate):
             created_at, updated_at, env
         ) 
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
     """, (
         doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, 
         doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, 
         doc.kode_jenis, doc.tgl_terbit, doc.tgl_awal, doc.tgl_akhir, doc.durasi_hk,
         waktu_sekarang, waktu_sekarang, doc_env
     ))
+    new_doc_id = cursor.fetchone()[0]
     conn.commit()
     conn.close()
 
@@ -559,7 +561,7 @@ def save_document(doc: DocumentUpdate):
     }
     sync_to_google_sheets(sheets_payload)
 
-    return {"status": "success"}
+    return {"status": "success", "id": new_doc_id}
 
 @app.delete("/api/documents/{doc_id}")
 def delete_document(doc_id: int):
