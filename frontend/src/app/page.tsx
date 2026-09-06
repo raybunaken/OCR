@@ -81,6 +81,33 @@ export default function Home() {
     });
   };
 
+  const copyAuditNoteToClipboard = (targetDoc: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!targetDoc) return;
+    const docOverrides = getDocOverrides(targetDoc);
+    const val = evaluateCrossValidation(targetDoc, docOverrides);
+    const isG = val.overallStatus === "green";
+    const isY = val.overallStatus === "yellow";
+    const hasResolved = val.checks.some((c: any) => c.isResolved);
+    const nonGreen = val.checks.filter((c: any) => c.status !== "green");
+    const catatans = nonGreen.length > 0
+      ? nonGreen.map((c: any) => `• ${c.label}: ${c.message}`).join("\n")
+      : "• Seluruh parameter audit terverifikasi cocok dan valid.";
+    
+    const clientName = targetDoc.nama_klien || targetDoc.principal || "-";
+    const policeNo = targetDoc.nomor_identitas || targetDoc.nomor_jaminan || "-";
+    const statusText = isG 
+      ? (hasResolved ? "Terverifikasi Valid (Disetujui Manual)" : "Terverifikasi Valid") 
+      : isY ? "Perlu Tinjauan Ringan" : "Perhatian Khusus (Ada Selisih)";
+
+    const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${clientName}\nNo. Polis: ${policeNo}\nStatus: ${statusText} (Akurasi: ${val.score}%)\n\nRincian Temuan:\n${catatans}\n\nMohon konfirmasi revisi ke pihak penjamin/klien.`;
+    
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(noteText);
+      toast.success("Catatan audit disalin ke clipboard!");
+    }
+  };
+
   const highlightInSource = (textToFind: string) => {
     if (!textToFind || textToFind === "-") {
       setHighlightedWord("");
@@ -94,67 +121,160 @@ export default function Home() {
         if (mark) {
           mark.scrollIntoView({ behavior: "smooth", block: "center" });
         }
-      }, 120);
+      }, 150);
     }
   };
 
+  const ID_MONTHS_MAP: Record<number, string> = {
+    1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni",
+    7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"
+  };
+  const ID_MONTHS_SHORT_MAP: Record<number, string> = {
+    1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mei", 6: "Jun",
+    7: "Jul", 8: "Agu|Ags", 9: "Sep", 10: "Okt", 11: "Nov", 12: "Des"
+  };
+
+  const buildHighlightPatterns = (targetStr: string): string[] => {
+    if (!targetStr || targetStr === "-" || targetStr.trim().length < 2) return [];
+
+    const subTargets = targetStr
+      .split("||")
+      .map(t => t.trim())
+      .filter(t => t.length > 0 && t !== "-");
+
+    const patterns: string[] = [];
+
+    for (const rawTarget of subTargets) {
+      // 1. DATE: format DD/MM/YYYY or YYYY-MM-DD or DD-MM-YYYY
+      const dateMatch = rawTarget.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/) ||
+                        rawTarget.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+      if (dateMatch) {
+        let day = 0, month = 0, year = 0;
+        if (dateMatch[1].length === 4) {
+          year = parseInt(dateMatch[1], 10);
+          month = parseInt(dateMatch[2], 10);
+          day = parseInt(dateMatch[3], 10);
+        } else {
+          day = parseInt(dateMatch[1], 10);
+          month = parseInt(dateMatch[2], 10);
+          year = parseInt(dateMatch[3], 10);
+        }
+
+        if (month >= 1 && month <= 12) {
+          const mLong = ID_MONTHS_MAP[month];
+          const mShort = ID_MONTHS_SHORT_MAP[month];
+          patterns.push(`0?${day}\\s+(?:${mLong}|${mShort})\\s+${year}`);
+          patterns.push(`0?${day}[\\/\\-\\.]0?${month}[\\/\\-\\.]${year}`);
+        }
+      }
+
+      // 2. DURATION / NUMBER: e.g. "45" or "120"
+      const isDuration = /^\d{1,3}$/.test(rawTarget.trim());
+      if (isDuration) {
+        const num = rawTarget.trim();
+        patterns.push(`(?:selama\\s+)?${num}\\s*(?:\\([^\\)]+\\)\\s*)?hari(?:\\s+kalender|\\s+kerja)?`);
+        patterns.push(`${num}\\s*(?:hari|HK|hk)`);
+        patterns.push(`(?:selama|durasi)\\s+${num}`);
+      }
+
+      // 3. CURRENCY / NOMINAL: e.g. "Rp 76.419.441,00" or "76.419.441"
+      const cleanNumOnly = rawTarget.replace(/[^\d]/g, "");
+      if (cleanNumOnly.length >= 5) {
+        const mainNum = rawTarget.split(",")[0].replace(/[^\d\.]/g, "").replace(/^\.+|\.+$/g, "");
+        if (mainNum.includes(".") && mainNum.length >= 5) {
+          const escapedNum = mainNum.replace(/\./g, "[\\.,\\s]");
+          patterns.push(`(?:Rp\\.?\\s*)?${escapedNum}(?:[\\.,]\\d{2})?(?:\\s*\\([^\\)]*Terbilang[^\\)]*\\))?`);
+        } else if (cleanNumOnly.length >= 6) {
+          patterns.push(cleanNumOnly);
+        }
+      }
+
+      // 4. Exact / space-insensitive
+      const safeRaw = rawTarget
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        .replace(/\s+/g, "[\\s\\n]+");
+      patterns.push(safeRaw);
+
+      // 5. Without PT / CV
+      if (/^(?:PT|CV)\.?\s+/i.test(rawTarget.trim())) {
+        const withoutPrefix = rawTarget.replace(/^(?:PT|CV)\.?\s+/i, "").trim();
+        if (withoutPrefix.length >= 3) {
+          patterns.push(withoutPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "[\\s\\n]+"));
+        }
+      }
+    }
+
+    return Array.from(new Set(patterns));
+  };
+
   const renderHighlightedText = (text: string, highlight: string) => {
+    if (!text) return "";
     if (!highlight || highlight === "-" || highlight.trim().length < 2) return text;
-    
-    // ATTEMPT 1: EXACT PHRASE MATCH (ignoring spaces/newlines)
-    const exactSafe = highlight
-      .trim()
-      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/\s+/g, '[\\s\\n]+');
-      
+
+    const patterns = buildHighlightPatterns(highlight);
+    if (patterns.length > 0) {
+      try {
+        patterns.sort((a, b) => b.length - a.length);
+        const combinedRegex = new RegExp(`(${patterns.join("|")})`, "gi");
+        if (combinedRegex.test(text)) {
+          const parts = text.split(combinedRegex);
+          return (
+            <>
+              {parts.map((part, i) =>
+                i % 2 === 1 ? (
+                  <mark
+                    key={i}
+                    className="ocr-mark bg-yellow-400 text-slate-900 px-1.5 py-0.5 rounded font-extrabold shadow-lg shadow-yellow-500/40 ring-2 ring-yellow-400/60 animate-pulse"
+                  >
+                    {part}
+                  </mark>
+                ) : (
+                  part
+                )
+              )}
+            </>
+          );
+        }
+      } catch (e) {
+        console.error("Highlight regex error:", e);
+      }
+    }
+
+    // ATTEMPT 2: Fallback fuzzy word match (words >= 4 chars, excluding stop words)
+    const stopWords = ['yang', 'dari', 'pada', 'atau', 'untuk', 'dengan', 'bahwa', 'kami', 'maka', 'dan', 'ini', 'itu', 'sebagai', 'atas', 'hari', 'tanggal', 'bulan', 'tahun', 'kepada', 'dalam', 'hal', 'surat', 'jaminan'];
+    const words = highlight
+      .split(/\s+/)
+      .map(w => w.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ""))
+      .filter(w => w.length >= 4 && !stopWords.includes(w.toLowerCase()));
+
+    if (words.length === 0) return text;
+
     try {
-      const exactRegex = new RegExp(`(${exactSafe})`, 'gi');
-      if (exactRegex.test(text)) {
-        const parts = text.split(exactRegex);
+      const safeWords = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      safeWords.sort((a, b) => b.length - a.length);
+      const fuzzyRegex = new RegExp(`(${safeWords.join("|")})`, "gi");
+      if (fuzzyRegex.test(text)) {
+        const parts = text.split(fuzzyRegex);
         return (
           <>
-            {parts.map((part, i) => 
-              i % 2 === 1 
-                ? <mark key={i} className="ocr-mark bg-yellow-400 text-slate-900 px-1 rounded font-bold shadow-lg shadow-yellow-500/30 animate-pulse">{part}</mark> 
-                : part
+            {parts.map((part, i) =>
+              i % 2 === 1 ? (
+                <mark key={i} className="ocr-mark bg-yellow-300 text-slate-900 px-1 rounded font-bold shadow-sm">
+                  {part}
+                </mark>
+              ) : (
+                part
+              )
             )}
           </>
         );
       }
     } catch (e) {
-      // Continue to fallback
+      // Fall through to plain text
     }
 
-    // ATTEMPT 2: FUZZY WORD MATCH (if exact phrase isn't found because AI modified it slightly)
-    const stopWords = ['yang', 'dari', 'pada', 'atau', 'untuk', 'dengan', 'bahwa', 'kami', 'maka', 'dan', 'ini', 'itu', 'sebagai', 'atas', 'hari', 'tanggal', 'bulan', 'tahun', 'kepada', 'dalam', 'hal', 'rp', 'no'];
-    
-    const words = highlight
-      .split(/\s+/)
-      .map(w => w.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '')) // Strip leading/trailing punctuation from each word
-      .filter(w => w.length > 2 && !stopWords.includes(w.toLowerCase()));
-      
-    if (words.length === 0) return text;
-    
-    const safeWords = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    
-    try {
-      // Sort so longer words are processed/matched first just in case
-      safeWords.sort((a, b) => b.length - a.length);
-      const fuzzyRegex = new RegExp(`(${safeWords.join('|')})`, 'gi');
-      const parts = text.split(fuzzyRegex);
-      
-      return (
-        <>
-          {parts.map((part, i) => 
-            i % 2 === 1 
-              ? <mark key={i} className="ocr-mark bg-yellow-300 text-slate-900 px-1 rounded shadow-sm">{part}</mark> 
-              : part
-          )}
-        </>
-      );
-    } catch (e) {
-      return text;
-    }
+    return text;
   };
 
   // Helper to parse numeric values from currency string (e.g. "Rp. 1.373.689.860,00" -> 1373689860)
@@ -607,7 +727,7 @@ export default function Home() {
     const tglAkhirStr = String(doc.tgl_akhir || "").trim();
     const rawDurasi = String(doc.durasi_hk || "").replace(/\D/g, "");
     const durasiHk = rawDurasi ? parseInt(rawDurasi, 10) : 0;
-    const dateHighlight = tglAwalStr && tglAwalStr !== "-" ? tglAwalStr : doc.masa_berlaku;
+    const dateHighlight = [tglAwalStr, tglAkhirStr, rawDurasi ? String(rawDurasi) : "", doc.masa_berlaku].filter(s => s && s !== "-").join(" || ");
 
     const parseDateHelper = (dStr: string): Date | null => {
       if (!dStr || dStr === "-") return null;
@@ -695,6 +815,7 @@ export default function Home() {
     // Pisahkan desimal/sen sebelum menghitung angka utama (misal: "Rp 14.945.040,00" -> ambil "14.945.040")
     const mainAmountStr = nilaiStr.split(",")[0].replace(/\.00$/, "");
     const cleanDigits = mainAmountStr.replace(/[^\d]/g, "");
+    const nominalHighlight = [nilaiStr, cleanDigits].filter(s => s && s !== "-").join(" || ");
 
     if (cleanDigits && cleanDigits.length >= 6) {
       const numVal = parseInt(cleanDigits, 10);
@@ -709,7 +830,7 @@ export default function Home() {
             status: "green",
             message: `Nominal skala Miliar (${nilaiStr}) terkonfirmasi pada kalimat terbilang dokumen`,
             details: `Kata 'Miliar' dan angka bersesuaian pada naskah asli`,
-            highlightTarget: nilaiStr
+            highlightTarget: nominalHighlight
           });
         } else {
           checks.push({
@@ -717,7 +838,7 @@ export default function Home() {
             label: "Uji Nominal vs Terbilang",
             status: "yellow",
             message: `Nominal skala Miliar (${nilaiStr}), pastikan terbilang di surat fisik sesuai`,
-            highlightTarget: nilaiStr
+            highlightTarget: nominalHighlight
           });
         }
       } else if (numVal >= 1_000_000) {
@@ -728,7 +849,7 @@ export default function Home() {
             status: "green",
             message: `Nominal skala Juta (${nilaiStr}) terkonfirmasi pada kalimat terbilang dokumen`,
             details: `Kata 'Juta' dan angka bersesuaian pada naskah asli`,
-            highlightTarget: nilaiStr
+            highlightTarget: nominalHighlight
           });
         } else {
           checks.push({
@@ -736,7 +857,7 @@ export default function Home() {
             label: "Uji Nominal vs Terbilang",
             status: "yellow",
             message: `Nominal ${nilaiStr} terdeteksi, kalimat terbilang tertutup cap atau belum terbaca`,
-            highlightTarget: nilaiStr
+            highlightTarget: nominalHighlight
           });
         }
       } else {
@@ -745,7 +866,7 @@ export default function Home() {
           label: "Nominal Jaminan",
           status: "green",
           message: `Nilai jaminan: ${nilaiStr}`,
-          highlightTarget: nilaiStr
+          highlightTarget: nominalHighlight
         });
       }
     } else if (!nilaiStr || nilaiStr === "-") {
@@ -761,7 +882,7 @@ export default function Home() {
         label: "Nominal Jaminan",
         status: "yellow",
         message: `Nilai jaminan: ${nilaiStr} (Format angka perlu ditinjau)`,
-        highlightTarget: nilaiStr
+        highlightTarget: nominalHighlight
       });
     }
 
@@ -797,6 +918,7 @@ export default function Home() {
     const principal = String(doc.principal || doc.nama_klien || "").trim();
     const obligee = String(doc.obligee || "").trim();
     const pekerjaan = String(doc.pekerjaan || "").trim();
+    const entitiesHighlight = [principal, obligee].filter(s => s && s !== "-").join(" || ");
 
     const missingEntities: string[] = [];
     if (!principal || principal === "-") missingEntities.push("Principal (Klien)");
@@ -809,7 +931,7 @@ export default function Home() {
         label: "Kelengkapan Pihak Penjaminan",
         status: "green",
         message: "Seluruh entitas (Principal, Obligee, & Nama Proyek) lengkap terisi",
-        highlightTarget: principal
+        highlightTarget: entitiesHighlight
       });
     } else if (missingEntities.length === 1) {
       checks.push({
@@ -817,7 +939,7 @@ export default function Home() {
         label: "Kelengkapan Pihak Penjaminan",
         status: "yellow",
         message: `Ada 1 informasi belum lengkap: ${missingEntities.join(", ")}`,
-        highlightTarget: principal !== "-" ? principal : undefined
+        highlightTarget: entitiesHighlight || undefined
       });
     } else {
       checks.push({
@@ -825,7 +947,7 @@ export default function Home() {
         label: "Kelengkapan Pihak Penjaminan",
         status: "red",
         message: `Entitas penting belum lengkap: ${missingEntities.join(", ")}`,
-        highlightTarget: principal !== "-" ? principal : undefined
+        highlightTarget: entitiesHighlight || undefined
       });
     }
 
@@ -1250,19 +1372,6 @@ export default function Home() {
                               const isY = rowVal.overallStatus === "yellow";
                               const hasResolved = rowVal.checks.some((c: any) => c.isResolved);
 
-                              const handleCopyAuditNote = (e: React.MouseEvent) => {
-                                e.stopPropagation();
-                                const nonGreen = rowVal.checks.filter((c: any) => c.status !== "green");
-                                const catatans = nonGreen.length > 0
-                                  ? nonGreen.map((c: any) => `• ${c.label}: ${c.message}`).join("\n")
-                                  : "• Seluruh data terverifikasi cocok dan valid.";
-                                
-                                const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${doc.nama_klien || "-"}\nNo. Polis: ${doc.nomor_identitas || "-"}\nStatus: ${isG ? (hasResolved ? "Terverifikasi Valid (Disetujui Manual)" : "Terverifikasi Valid") : isY ? "Perlu Tinjauan Ringan" : "Perhatian Khusus (Ada Selisih)"} (Akurasi: ${rowVal.score}%)\n\nRincian Catatan:\n${catatans}\n\nMohon konfirmasi revisi ke pihak penerbit/klien.`;
-                                
-                                navigator.clipboard.writeText(noteText);
-                                toast.success("Catatan audit disalin ke clipboard!");
-                              };
-
                               return (
                                 <div className="inline-flex items-center gap-1.5 shrink-0 flex-wrap">
                                   <button 
@@ -1304,7 +1413,7 @@ export default function Home() {
                                   {!isG && (
                                     <button
                                       type="button"
-                                      onClick={handleCopyAuditNote}
+                                      onClick={(e) => copyAuditNoteToClipboard(doc, e)}
                                       title="Salin catatan audit untuk dikirim ke WhatsApp/Email"
                                       className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
                                     >
@@ -1417,31 +1526,62 @@ export default function Home() {
             <div className={extractedData ? "grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full" : "max-w-2xl mx-auto space-y-6 pt-2 pb-12"}>
               {/* KOLOM KIRI: Upload & Data Terstruktur (50% Split) */}
               <div className={extractedData ? "lg:col-span-6 space-y-6" : ""}>
-                {/* Kotak Upload */}
-                <div className={`glass-panel rounded-3xl text-center border-dashed border-2 border-slate-600 hover:border-sky-500 transition-colors ${extractedData ? "p-6" : "p-10 sm:p-14"}`}>
-                  <div className="w-12 h-12 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                    <svg className="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                  </div>
-                  <h2 className="text-lg font-semibold mb-1">Upload Dokumen</h2>
-                  <p className="text-slate-400 mb-4 text-xs">Pilih file PDF, JPG, atau PNG.</p>
-                  
-                  <input type="file" onChange={handleFileChange} className="hidden" id="file-upload" />
-                  <label htmlFor="file-upload" className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-white px-6 py-2.5 rounded-full text-xs font-semibold transition-colors inline-block mb-2 border border-slate-600/60">
-                    {file ? file.name : "Browse Files"}
-                  </label>
-                  
-                  {file && (
-                    <div className="mt-3">
-                      <button 
-                        onClick={handleUpload} 
-                        disabled={isUploading}
-                        className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-2.5 rounded-full text-xs font-bold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50 cursor-pointer"
-                      >
-                        {isUploading ? "Memproses AI..." : "Ekstrak Sekarang"}
-                      </button>
+                {/* Kotak Upload: Jika ada data terekstrak, tampilkan bar ringkas agar hemat ruang */}
+                {extractedData ? (
+                  <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700/80 shadow-md mb-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white truncate flex items-center gap-2">
+                          <span>{extractedData.principal || "Dokumen Aktif"}</span>
+                          {extractedData.id && <span className="text-[10px] text-slate-400 font-mono">#{extractedData.id}</span>}
+                        </div>
+                        <div className="text-[11px] text-slate-400 truncate">
+                          {extractedData.nomor_jaminan || "No. Polis: -"} • {extractedData.jenis_jaminan || "Surety Bond"}
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input type="file" onChange={handleFileChange} className="hidden" id="file-upload-reupload" />
+                      <label htmlFor="file-upload-reupload" className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border border-slate-700 hover:border-slate-600 flex items-center gap-1.5 shadow-sm">
+                        <svg className="w-3.5 h-3.5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                        <span>Ganti File</span>
+                      </label>
+                      {file && (
+                        <button onClick={handleUpload} disabled={isUploading} className="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow transition-all cursor-pointer">
+                          {isUploading ? "..." : "Ekstrak"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="glass-panel rounded-3xl text-center border-dashed border-2 border-slate-600 hover:border-sky-500 transition-colors p-10 sm:p-14">
+                    <div className="w-12 h-12 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                      <svg className="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                    </div>
+                    <h2 className="text-lg font-semibold mb-1">Upload Dokumen</h2>
+                    <p className="text-slate-400 mb-4 text-xs">Pilih file PDF, JPG, atau PNG.</p>
+                    
+                    <input type="file" onChange={handleFileChange} className="hidden" id="file-upload" />
+                    <label htmlFor="file-upload" className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-white px-6 py-2.5 rounded-full text-xs font-semibold transition-colors inline-block mb-2 border border-slate-600/60">
+                      {file ? file.name : "Browse Files"}
+                    </label>
+                    
+                    {file && (
+                      <div className="mt-3">
+                        <button 
+                          onClick={handleUpload} 
+                          disabled={isUploading}
+                          className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-2.5 rounded-full text-xs font-bold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50 cursor-pointer"
+                        >
+                          {isUploading ? "Memproses AI..." : "Ekstrak Sekarang"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Kotak Form Data Terstruktur */}
                 {extractedData && (
@@ -1509,44 +1649,42 @@ export default function Home() {
                       </div>
                     </div>
                     
-                    {/* 🛡️ Executive Audit Bar: Sleek, compact status bar */}
+                    {/* 🛡️ 4 Kartu Parameter Validasi Silang (Bersih, Rapi, Langsung Interaktif) */}
                     {(() => {
                       const docOverrides = getDocOverrides(extractedData);
                       const valResult = evaluateCrossValidation(extractedData, docOverrides);
                       const isGreen = valResult.overallStatus === "green";
                       const isYellow = valResult.overallStatus === "yellow";
                       const hasResolved = valResult.checks.some((c: any) => c.isResolved);
-                      const nonGreenChecks = valResult.checks.filter((c: any) => c.status !== "green");
 
                       return (
-                        <div className={`p-4 rounded-2xl border transition-all mb-6 shadow-md ${
-                          isGreen
-                            ? hasResolved
-                              ? "bg-sky-950/25 border-sky-500/40 text-sky-200"
-                              : "bg-emerald-950/20 border-emerald-500/30 text-emerald-200"
-                            : isYellow
-                            ? "bg-amber-950/25 border-amber-500/40 text-amber-200"
-                            : "bg-rose-950/25 border-rose-500/40 text-rose-200"
-                        }`}>
-                          <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="mb-6 space-y-3">
+                          {/* Executive Header Bar */}
+                          <div className={`p-3.5 rounded-2xl border transition-all shadow-sm flex flex-wrap items-center justify-between gap-3 ${
+                            isGreen
+                              ? hasResolved
+                                ? "bg-sky-950/25 border-sky-500/40"
+                                : "bg-emerald-950/20 border-emerald-500/30"
+                              : isYellow
+                              ? "bg-amber-950/25 border-amber-500/40"
+                              : "bg-rose-950/25 border-rose-500/40"
+                          }`}>
                             <div className="flex items-center gap-3 min-w-0 flex-1">
-                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border ${
                                 isGreen
                                   ? hasResolved ? "bg-sky-500/15 border-sky-500/40 text-sky-400" : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
                                   : isYellow
                                   ? "bg-amber-500/15 border-amber-500/40 text-amber-400"
                                   : "bg-rose-500/15 border-rose-500/40 text-rose-400"
                               }`}>
-                                {isGreen ? (
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
-                                ) : (
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                )}
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                </svg>
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-sm font-bold text-white tracking-wide">
-                                    {valResult.headline}
+                                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                                    Hasil Validasi 4 Parameter Polis
                                   </span>
                                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
                                     isGreen
@@ -1559,9 +1697,7 @@ export default function Home() {
                                   </span>
                                 </div>
                                 <p className="text-xs text-slate-300 mt-0.5 truncate">
-                                  {nonGreenChecks.length > 0
-                                    ? nonGreenChecks.map((c: any) => `${c.label}: ${c.message}`).join(" • ")
-                                    : "Semua 4 parameter struktural polis asuransi terverifikasi akurat dan konsisten."}
+                                  {valResult.headline}
                                 </p>
                               </div>
                             </div>
@@ -1569,56 +1705,140 @@ export default function Home() {
                             <div className="flex items-center gap-2 shrink-0">
                               <button
                                 type="button"
+                                onClick={() => copyAuditNoteToClipboard(extractedData)}
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-700/60 hover:border-emerald-500 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                                title="Salin ringkasan audit untuk dikirim ke WhatsApp/Email"
+                              >
+                                <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                <span>Salin WA</span>
+                              </button>
+
+                              <button
+                                type="button"
                                 onClick={() => setSelectedAuditDoc(extractedData)}
-                                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                                title="Buka jendela catatan lengkap & riwayat audit"
                               >
                                 <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                <span>Catatan Audit & Opsi</span>
+                                <span>Detail</span>
                               </button>
                             </div>
                           </div>
 
-                          {/* Row 2: Interactive Quick-Refer Pills (Sorot Naskah Langsung 1-Klik) */}
-                          <div className="mt-3 pt-2.5 border-t border-slate-700/50 flex flex-wrap items-center gap-2">
-                            <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 shrink-0 uppercase tracking-wider">
-                              <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                              Sorot Naskah:
-                            </span>
+                          {/* 4 Clean Audit Parameter Cards (2x2 Grid) */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             {valResult.checks.map((c: any) => {
                               const isResolved = Boolean(c.isResolved);
                               const isG = c.status === "green";
                               const isY = c.status === "yellow";
-                              const isActive = highlightedWord && c.highlightTarget && highlightedWord === c.highlightTarget;
+                              const isActive = Boolean(highlightedWord && c.highlightTarget && (highlightedWord === c.highlightTarget || c.highlightTarget.includes(highlightedWord)));
 
                               return (
-                                <button
+                                <div
                                   key={c.id}
-                                  type="button"
                                   onClick={() => {
                                     if (c.highlightTarget) {
                                       highlightInSource(c.highlightTarget);
                                       toast.success(`Menyorot ${c.label} di naskah dokumen`);
                                     }
                                   }}
-                                  title={`Klik untuk langsung menyorot di naskah OCR: ${c.message}`}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 border shadow-sm ${
+                                  title="Klik untuk langsung menyorot posisi kalimat ini pada lembar OCR"
+                                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between group relative shadow-sm ${
                                     isActive
-                                      ? "bg-yellow-400 text-slate-900 border-yellow-300 font-bold ring-2 ring-yellow-400/50 scale-105"
+                                      ? "bg-yellow-400/10 border-yellow-400/80 ring-2 ring-yellow-400/60 shadow-yellow-500/10 scale-[1.01]"
                                       : isResolved
-                                      ? "bg-sky-950/60 hover:bg-sky-900 text-sky-300 border-sky-600/50"
+                                      ? "bg-sky-950/20 hover:bg-sky-950/40 border-sky-600/40 hover:border-sky-500/60"
                                       : isG
-                                      ? "bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700/80 hover:border-emerald-500/50"
+                                      ? "bg-slate-900/70 hover:bg-slate-800/80 border-slate-700/80 hover:border-slate-600"
                                       : isY
-                                      ? "bg-amber-950/50 hover:bg-amber-900/70 text-amber-300 border-amber-600/50 hover:border-amber-400"
-                                      : "bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border-rose-600/50 hover:border-rose-400"
+                                      ? "bg-amber-950/20 hover:bg-amber-950/40 border-amber-600/40 hover:border-amber-500/60"
+                                      : "bg-rose-950/20 hover:bg-rose-950/40 border-rose-600/40 hover:border-rose-500/60"
                                   }`}
                                 >
-                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                    isActive ? "bg-slate-900" : isResolved ? "bg-sky-400" : isG ? "bg-emerald-400" : isY ? "bg-amber-400" : "bg-rose-400"
-                                  }`} />
-                                  <span>{c.label}</span>
-                                  <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                </button>
+                                  {/* Baris Atas Kartu */}
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className={`w-2 h-2 rounded-full shrink-0 ${
+                                        isActive
+                                          ? "bg-yellow-400 animate-ping"
+                                          : isResolved
+                                          ? "bg-sky-400"
+                                          : isG
+                                          ? "bg-emerald-400"
+                                          : isY
+                                          ? "bg-amber-400"
+                                          : "bg-rose-400"
+                                      }`} />
+                                      <span className="text-xs font-bold text-slate-200 group-hover:text-white truncate">
+                                        {c.label}
+                                      </span>
+                                    </div>
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border shrink-0 ${
+                                      isActive
+                                        ? "bg-yellow-400 text-slate-900 border-yellow-300 font-extrabold"
+                                        : isResolved
+                                        ? "bg-sky-500/20 text-sky-300 border-sky-500/40"
+                                        : isG
+                                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                        : isY
+                                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                                        : "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                                    }`}>
+                                      {isResolved ? "Disetujui" : isG ? "Valid" : isY ? "Tinjau" : "Ada Selisih"}
+                                    </span>
+                                  </div>
+
+                                  {/* Isi Temuan Kartu */}
+                                  <p className="text-xs text-slate-300 my-2 leading-relaxed font-medium line-clamp-2">
+                                    {c.message}
+                                  </p>
+
+                                  {/* Baris Bawah / Tindakan Kartu */}
+                                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 mt-auto">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (c.highlightTarget) {
+                                          highlightInSource(c.highlightTarget);
+                                          toast.success(`Menyorot ${c.label} di naskah dokumen`);
+                                        }
+                                      }}
+                                      className={`text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                                        isActive ? "text-yellow-400 font-bold" : "text-sky-400 hover:text-sky-300"
+                                      }`}
+                                    >
+                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                      <span>{isActive ? "Sedang Disorot" : "Sorot Naskah ↗"}</span>
+                                    </button>
+
+                                    {/* Tombol Resolusi Cepat */}
+                                    {c.resolvedOriginalStatus !== "green" && !isG && !isResolved && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleCheckResolve(extractedData, c.id, c.label);
+                                        }}
+                                        className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-sm transition-all cursor-pointer"
+                                      >
+                                        Setujui Manual
+                                      </button>
+                                    )}
+                                    {isResolved && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleCheckResolve(extractedData, c.id, c.label);
+                                        }}
+                                        className="text-[10px] font-semibold text-slate-400 hover:text-rose-400 underline transition-colors cursor-pointer"
+                                      >
+                                        Batalkan
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
                               );
                             })}
                           </div>
