@@ -953,7 +953,9 @@ export default function Home() {
 
 
   return (
-    <main className="min-h-screen px-4 sm:px-8 py-10 max-w-7xl mx-auto">
+    <main className={`min-h-screen px-4 sm:px-6 lg:px-8 py-8 mx-auto transition-all ${
+      activeTab === "upload" && extractedData ? "max-w-[1650px]" : "max-w-7xl"
+    }`}>
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
         <div>
@@ -1498,152 +1500,72 @@ export default function Home() {
                       </div>
                     </div>
                     
-                    {/* 🛡️ Traffic Light System: AI Cross-Validation Banner (Premium Executive Design) */}
+                    {/* 🛡️ Executive Audit Bar: Sleek, compact status bar */}
                     {(() => {
                       const docOverrides = getDocOverrides(extractedData);
                       const valResult = evaluateCrossValidation(extractedData, docOverrides);
                       const isGreen = valResult.overallStatus === "green";
                       const isYellow = valResult.overallStatus === "yellow";
-                      const isRed = valResult.overallStatus === "red";
+                      const hasResolved = valResult.checks.some((c: any) => c.isResolved);
+                      const nonGreenChecks = valResult.checks.filter((c: any) => c.status !== "green");
 
                       return (
-                        <div className={`p-5 rounded-2xl border transition-all mb-6 shadow-xl ${
+                        <div className={`p-3.5 sm:p-4 rounded-2xl border transition-all mb-6 flex flex-wrap items-center justify-between gap-3 shadow-md ${
                           isGreen
-                            ? "bg-slate-900/90 border-emerald-500/50 shadow-emerald-950/20"
+                            ? hasResolved
+                              ? "bg-sky-950/25 border-sky-500/40 text-sky-200"
+                              : "bg-emerald-950/20 border-emerald-500/30 text-emerald-200"
                             : isYellow
-                            ? "bg-slate-900/90 border-amber-500/50 shadow-amber-950/20"
-                            : "bg-slate-900/90 border-rose-500/50 shadow-rose-950/20"
+                            ? "bg-amber-950/25 border-amber-500/40 text-amber-200"
+                            : "bg-rose-950/25 border-rose-500/40 text-rose-200"
                         }`}>
-                          <div className="flex flex-wrap items-center justify-between gap-4">
-                            <div className="flex items-start sm:items-center gap-3.5">
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
-                                isGreen 
-                                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" 
-                                  : isYellow
-                                  ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
-                                  : "bg-rose-500/10 border-rose-500/30 text-rose-400"
-                              }`}>
-                                {isGreen ? (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
-                                ) : (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                )}
-                              </div>
-                              <div>
-                                <h3 className="text-base sm:text-lg font-bold text-white tracking-wide">
-                                  {valResult.headline}
-                                </h3>
-                                <p className="text-xs sm:text-sm text-slate-300 mt-1 leading-relaxed">
-                                  {isGreen 
-                                    ? "Semua 4 parameter struktural polis asuransi terverifikasi akurat dan konsisten."
-                                    : isYellow
-                                    ? "Terdapat peringatan minor pada format atau nomor naskah. Periksa detail di bawah."
-                                    : "PERHATIAN: Ditemukan ketidakcocokan data penting antara klausul dan tabel angka!"}
-                                </p>
-                              </div>
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                              isGreen
+                                ? hasResolved ? "bg-sky-500/15 border-sky-500/40 text-sky-400" : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
+                                : isYellow
+                                ? "bg-amber-500/15 border-amber-500/40 text-amber-400"
+                                : "bg-rose-500/15 border-rose-500/40 text-rose-400"
+                            }`}>
+                              {isGreen ? (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                              ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                              )}
                             </div>
-                            
-                            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-                              <span className="text-xs sm:text-sm font-semibold text-slate-300 px-3 py-1 rounded-full bg-slate-950 border border-slate-800">
-                                Akurasi: {valResult.score}%
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setShowValidationDetail(!showValidationDetail)}
-                                className="text-xs text-sky-400 hover:text-sky-300 font-semibold underline cursor-pointer"
-                              >
-                                {showValidationDetail ? "Sembunyikan Rincian" : "Lihat Rincian Analisis (4 Parameter)"}
-                              </button>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-bold text-white tracking-wide">
+                                  {valResult.headline}
+                                </span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
+                                  isGreen
+                                    ? hasResolved ? "bg-sky-500/20 text-sky-300 border-sky-500/40" : "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                    : isYellow
+                                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                                    : "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                                }`}>
+                                  Akurasi {valResult.score}%
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-300 mt-0.5 truncate">
+                                {nonGreenChecks.length > 0
+                                  ? nonGreenChecks.map((c: any) => `${c.label}: ${c.message}`).join(" • ")
+                                  : "Semua 4 parameter struktural polis asuransi terverifikasi akurat dan konsisten."}
+                              </p>
                             </div>
                           </div>
 
-                          {/* Accordion Rincian Validasi Silang */}
-                          {showValidationDetail && (
-                            <div className="mt-5 pt-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-3.5 animate-in fade-in duration-300">
-                              {valResult.checks.map((c: any) => {
-                                const checkGreen = c.status === "green";
-                                const checkYellow = c.status === "yellow";
-                                const isResolved = Boolean(c.isResolved);
-
-                                return (
-                                  <div 
-                                    key={c.id} 
-                                    onClick={() => {
-                                      if (c.highlightTarget) {
-                                        highlightInSource(c.highlightTarget);
-                                        toast.success(`Menyorot ${c.label} di naskah dokumen`);
-                                      }
-                                    }}
-                                    title="Klik untuk menyorot bagian ini di naskah dokumen asli"
-                                    className={`p-4 rounded-xl border bg-slate-950/70 transition-all cursor-pointer group hover:scale-[1.01] hover:bg-slate-900/90 ${
-                                      isResolved
-                                        ? "border-sky-500/40 bg-sky-950/20 hover:border-sky-400 shadow-sm"
-                                        : checkGreen
-                                        ? "border-emerald-500/30 hover:border-emerald-400 shadow-sm"
-                                        : checkYellow
-                                        ? "border-amber-500/30 hover:border-amber-400 shadow-sm"
-                                        : "border-rose-500/40 hover:border-rose-400 shadow-sm"
-                                    }`}
-                                  >
-                                    <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                                      <div className="flex items-center gap-2">
-                                        <span className={`w-2 h-2 rounded-full ${
-                                          isResolved ? "bg-sky-400" : checkGreen ? "bg-emerald-400" : checkYellow ? "bg-amber-400" : "bg-rose-400"
-                                        }`} />
-                                        <span className="text-sm font-bold text-white tracking-wide group-hover:text-sky-300 transition-colors">
-                                          {c.label}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center gap-1.5">
-                                        {(c.resolvedOriginalStatus !== "green" || isResolved) && (
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              toggleCheckResolve(extractedData, String(c.id), c.label);
-                                            }}
-                                            className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border transition-all cursor-pointer ${
-                                              isResolved
-                                                ? "bg-sky-950 text-sky-300 border-sky-600/60 hover:bg-sky-900"
-                                                : "bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700"
-                                            }`}
-                                          >
-                                            {isResolved ? "Batalkan Setujui" : "Setujui Manual"}
-                                          </button>
-                                        )}
-                                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
-                                          isResolved
-                                            ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
-                                            : checkGreen
-                                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                                            : checkYellow
-                                            ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                                            : "bg-rose-500/10 text-rose-400 border-rose-500/30"
-                                        }`}>
-                                          {isResolved ? "Disetujui Manual" : checkGreen ? "Sesuai" : checkYellow ? "Tinjau" : "Selisih"}
-                                        </span>
-                                      </div>
-                                    </div>
-                                    <div className="text-sm text-slate-200 font-medium leading-relaxed">
-                                      {c.message}
-                                    </div>
-                                    {c.details && (
-                                      <div className="text-xs text-slate-400 mt-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800/80 font-mono">
-                                        {c.details}
-                                      </div>
-                                    )}
-                                    <div className="mt-2.5 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400 group-hover:text-sky-300 transition-colors">
-                                      <span className="flex items-center gap-1.5 font-medium">
-                                        <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                        <span>Klik kartu untuk sorot di teks asli</span>
-                                      </span>
-                                      <span className="text-slate-500 group-hover:text-sky-400 font-mono">↗</span>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAuditDoc(extractedData)}
+                              className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                            >
+                              <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                              <span>Catatan Audit & Opsi</span>
+                            </button>
+                          </div>
                         </div>
                       );
                     })()}
@@ -2382,7 +2304,7 @@ export default function Home() {
                   <div>
                     <h3 className="text-lg font-bold text-white tracking-tight">Catatan Audit Dokumen</h3>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      <span className="font-semibold text-slate-200">{selectedAuditDoc.nama_klien || "-"}</span> • Polis: <span className="font-mono text-slate-300">{selectedAuditDoc.nomor_identitas || "-"}</span>
+                      <span className="font-semibold text-slate-200">{selectedAuditDoc.nama_klien || selectedAuditDoc.principal || "-"}</span> • Polis: <span className="font-mono text-slate-300">{selectedAuditDoc.nomor_identitas || selectedAuditDoc.nomor_jaminan || "-"}</span>
                     </p>
                   </div>
                 </div>
@@ -2444,30 +2366,41 @@ export default function Home() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {(c.resolvedOriginalStatus !== "green" || isResolved) && (
-                            <button
-                              type="button"
-                              onClick={() => toggleCheckResolve(selectedAuditDoc, c.id, c.label)}
-                              className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border transition-all cursor-pointer ${
-                                isResolved
-                                  ? "bg-sky-950 text-sky-300 border-sky-600/60 hover:bg-sky-900"
-                                  : "bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700"
-                              }`}
-                            >
-                              {isResolved ? "Batalkan Setujui" : "Setujui Manual"}
-                            </button>
+                          {isResolved ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-md border bg-sky-500/10 text-sky-400 border-sky-500/30 flex items-center gap-1">
+                                ✓ Disetujui Manual
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleCheckResolve(selectedAuditDoc, c.id, c.label)}
+                                className="text-[11px] text-slate-400 hover:text-rose-400 underline cursor-pointer transition-colors"
+                              >
+                                Batalkan
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              {c.resolvedOriginalStatus !== "green" && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCheckResolve(selectedAuditDoc, c.id, c.label)}
+                                  className="px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-sky-600 hover:bg-sky-500 text-white shadow-sm transition-all cursor-pointer"
+                                >
+                                  Setujui Manual
+                                </button>
+                              )}
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${
+                                checkGreen
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                  : checkYellow
+                                  ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                  : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                              }`}>
+                                {checkGreen ? "Valid" : checkYellow ? "Tinjau" : "Ada Selisih"}
+                              </span>
+                            </div>
                           )}
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${
-                            isResolved
-                              ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
-                              : checkGreen
-                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                              : checkYellow
-                              ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                              : "bg-rose-500/10 text-rose-400 border-rose-500/30"
-                          }`}>
-                            {isResolved ? "Disetujui Manual" : checkGreen ? "Valid" : checkYellow ? "Tinjau" : "Ada Selisih"}
-                          </span>
                         </div>
                       </div>
                       <p className="text-xs text-slate-300 leading-relaxed pl-4">
@@ -2490,38 +2423,40 @@ export default function Home() {
                 </button>
 
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUploadMode("single");
-                      setExtractedData({
-                        id: selectedAuditDoc.id,
-                        principal: selectedAuditDoc.nama_klien,
-                        jenis_jaminan: selectedAuditDoc.jenis_dokumen,
-                        kode_jenis: selectedAuditDoc.kode_jenis || (selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("pemeliharaan") ? "MB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("uang muka") ? "APB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("penawaran") ? "BB" : "PB"),
-                        nomor_jaminan: selectedAuditDoc.nomor_identitas,
-                        nilai_jaminan: selectedAuditDoc.nilai_proyek,
-                        obligee: selectedAuditDoc.obligee,
-                        pekerjaan: selectedAuditDoc.pekerjaan,
-                        masa_berlaku: selectedAuditDoc.masa_berlaku,
-                        tgl_terbit: selectedAuditDoc.tgl_terbit || "",
-                        tgl_awal: selectedAuditDoc.tgl_awal || "",
-                        tgl_akhir: selectedAuditDoc.tgl_akhir || "",
-                        durasi_hk: selectedAuditDoc.durasi_hk || "",
-                        teks_asli: selectedAuditDoc.teks_dokumen
-                      });
-                      setSelectedAuditDoc(null);
-                      setActiveTab("upload");
-                      if (typeof window !== "undefined") {
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }
-                      toast.info(`Membuka editor & naskah OCR: ${selectedAuditDoc.nama_klien || "-"}`);
-                    }}
-                    className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition-all cursor-pointer shadow-lg shadow-sky-600/25 flex items-center gap-1.5"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                    <span>Buka Editor & OCR</span>
-                  </button>
+                  {activeTab !== "upload" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadMode("single");
+                        setExtractedData({
+                          id: selectedAuditDoc.id,
+                          principal: selectedAuditDoc.nama_klien || selectedAuditDoc.principal,
+                          jenis_jaminan: selectedAuditDoc.jenis_dokumen || selectedAuditDoc.jenis_jaminan,
+                          kode_jenis: selectedAuditDoc.kode_jenis || (selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("pemeliharaan") ? "MB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("uang muka") ? "APB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("penawaran") ? "BB" : "PB"),
+                          nomor_jaminan: selectedAuditDoc.nomor_identitas || selectedAuditDoc.nomor_jaminan,
+                          nilai_jaminan: selectedAuditDoc.nilai_proyek || selectedAuditDoc.nilai_jaminan,
+                          obligee: selectedAuditDoc.obligee,
+                          pekerjaan: selectedAuditDoc.pekerjaan,
+                          masa_berlaku: selectedAuditDoc.masa_berlaku,
+                          tgl_terbit: selectedAuditDoc.tgl_terbit || "",
+                          tgl_awal: selectedAuditDoc.tgl_awal || "",
+                          tgl_akhir: selectedAuditDoc.tgl_akhir || "",
+                          durasi_hk: selectedAuditDoc.durasi_hk || "",
+                          teks_asli: selectedAuditDoc.teks_dokumen || selectedAuditDoc.teks_asli
+                        });
+                        setSelectedAuditDoc(null);
+                        setActiveTab("upload");
+                        if (typeof window !== "undefined") {
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }
+                        toast.info(`Membuka editor & naskah OCR: ${selectedAuditDoc.nama_klien || selectedAuditDoc.principal || "-"}`);
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition-all cursor-pointer shadow-lg shadow-sky-600/25 flex items-center gap-1.5"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      <span>Buka Editor & OCR</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setSelectedAuditDoc(null)}
