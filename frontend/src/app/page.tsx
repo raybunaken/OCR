@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://mydata-201q.onrender.com";
 
 interface BatchFileItem {
   id: string;
@@ -24,6 +24,7 @@ export default function Home() {
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
   const stopBatchRef = useRef(false);
   const [documents, setDocuments] = useState<any[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
   const [deleteModalData, setDeleteModalData] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isCopiedExcel, setIsCopiedExcel] = useState(false);
@@ -201,6 +202,7 @@ export default function Home() {
 
   // Fetch Documents
   const fetchDocuments = async () => {
+    setIsLoadingDocs(true);
     try {
       const res = await fetch(`${API_URL}/api/documents?env=${APP_ENV}`);
       const data = await res.json();
@@ -213,6 +215,8 @@ export default function Home() {
     } catch (err) {
       console.error("Fetch error:", err);
       setDocuments([]);
+    } finally {
+      setIsLoadingDocs(false);
     }
   };
 
@@ -1035,17 +1039,32 @@ export default function Home() {
                   <p className="text-slate-400 text-xs sm:text-sm mt-1">Daftar seluruh riwayat dokumen asuransi yang tersimpan</p>
                 </div>
 
-                <a 
-                  href={`${API_URL}/api/documents/export/excel`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/25 flex items-center gap-2 border border-emerald-400/40 cursor-pointer self-stretch sm:self-auto justify-center"
-                >
-                  <svg className="w-4 h-4 text-emerald-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span>Unduh File Excel (.xlsx)</span>
-                </a>
+                <div className="flex items-center gap-2 self-stretch sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={fetchDocuments}
+                    disabled={isLoadingDocs}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all border border-slate-700 hover:border-slate-600 cursor-pointer flex items-center gap-2 justify-center disabled:opacity-50"
+                    title="Segarkan data dokumen dari server"
+                  >
+                    <svg className={`w-4 h-4 text-sky-400 ${isLoadingDocs ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>{isLoadingDocs ? "Memuat..." : "Segarkan"}</span>
+                  </button>
+
+                  <a 
+                    href={`${API_URL}/api/documents/export/excel`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/25 flex items-center gap-2 border border-emerald-400/40 cursor-pointer justify-center flex-1 sm:flex-initial"
+                  >
+                    <svg className="w-4 h-4 text-emerald-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span>Unduh File Excel (.xlsx)</span>
+                  </a>
+                </div>
               </div>
 
               {/* Filters & Search Control Bar */}
@@ -1176,8 +1195,36 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/50">
-                  {filteredDocuments.length === 0 ? (
-                    <tr><td colSpan={5} className="p-8 text-center text-slate-400">Pencarian tidak menemukan hasil.</td></tr>
+                  {isLoadingDocs ? (
+                    <tr>
+                      <td colSpan={5} className="p-12 text-center">
+                        <div className="flex flex-col items-center justify-center gap-3">
+                          <svg className="animate-spin h-7 w-7 text-sky-400" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          <p className="text-sm font-semibold text-slate-200">Menghubungkan ke database server...</p>
+                          <p className="text-xs text-slate-400 max-w-sm">Mohon tunggu beberapa detik jika server backend sedang proses warming up dari mode sleep.</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : filteredDocuments.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-10 text-center text-slate-400">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <p className="text-sm text-slate-300 font-medium">Pencarian tidak menemukan hasil.</p>
+                          <p className="text-xs text-slate-500">Coba ubah kata kunci filter atau segarkan data dari server.</p>
+                          <button
+                            type="button"
+                            onClick={fetchDocuments}
+                            className="mt-2 px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-slate-700 transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            <span>Muat Ulang Data Server</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   ) : (
                     filteredDocuments.map((doc: any) => (
                       <tr key={doc.id} className="hover:bg-slate-800/30 transition-colors">
