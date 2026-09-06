@@ -34,7 +34,51 @@ export default function Home() {
   const [highlightedWord, setHighlightedWord] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
   const [showValidationDetail, setShowValidationDetail] = useState(false);
-  const [resolvedChecks, setResolvedChecks] = useState<Record<string, boolean>>({});
+  const [selectedAuditDoc, setSelectedAuditDoc] = useState<any | null>(null);
+  const [resolvedMap, setResolvedMap] = useState<Record<string, Record<string, boolean>>>({});
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("surety_resolved_checks");
+        if (saved) setResolvedMap(JSON.parse(saved));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, []);
+
+  const getDocKey = (d: any) => String(d?.id || d?.nomor_identitas || d?.principal || "doc");
+
+  const getDocOverrides = (d: any) => {
+    if (!d) return {};
+    const key = getDocKey(d);
+    return resolvedMap[key] || {};
+  };
+
+  const toggleCheckResolve = (doc: any, checkId: string, checkLabel: string) => {
+    if (!doc) return;
+    const key = getDocKey(doc);
+    setResolvedMap(prev => {
+      const docOverrides = { ...(prev[key] || {}) };
+      const currentVal = Boolean(docOverrides[checkId]);
+      docOverrides[checkId] = !currentVal;
+      const nextMap: Record<string, Record<string, boolean>> = { ...prev, [key]: docOverrides };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("surety_resolved_checks", JSON.stringify(nextMap));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      if (!currentVal) {
+        toast.success(`${checkLabel} disetujui manual`);
+      } else {
+        toast.info(`Persetujuan manual ${checkLabel} dibatalkan`);
+      }
+      return nextMap;
+    });
+  };
 
   const highlightInSource = (textToFind: string) => {
     if (!textToFind || textToFind === "-") {
@@ -1142,9 +1186,11 @@ export default function Home() {
                           <div className="flex items-center gap-2.5 flex-wrap">
                             <span>{doc.nama_klien}</span>
                             {(() => {
-                              const rowVal = evaluateCrossValidation(doc);
+                              const docOverrides = getDocOverrides(doc);
+                              const rowVal = evaluateCrossValidation(doc, docOverrides);
                               const isG = rowVal.overallStatus === "green";
                               const isY = rowVal.overallStatus === "yellow";
+                              const hasResolved = rowVal.checks.some((c: any) => c.isResolved);
 
                               const handleCopyAuditNote = (e: React.MouseEvent) => {
                                 e.stopPropagation();
@@ -1153,29 +1199,49 @@ export default function Home() {
                                   ? nonGreen.map((c: any) => `• ${c.label}: ${c.message}`).join("\n")
                                   : "• Seluruh data terverifikasi cocok dan valid.";
                                 
-                                const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${doc.nama_klien || "-"}\nNo. Polis: ${doc.nomor_identitas || "-"}\nStatus: ${isG ? "Terverifikasi Valid" : isY ? "Perlu Tinjauan Ringan" : "Perhatian Khusus (Ada Selisih)"} (Akurasi: ${rowVal.score}%)\n\nRincian Catatan:\n${catatans}`;
+                                const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${doc.nama_klien || "-"}\nNo. Polis: ${doc.nomor_identitas || "-"}\nStatus: ${isG ? (hasResolved ? "Terverifikasi Valid (Disetujui Manual)" : "Terverifikasi Valid") : isY ? "Perlu Tinjauan Ringan" : "Perhatian Khusus (Ada Selisih)"} (Akurasi: ${rowVal.score}%)\n\nRincian Catatan:\n${catatans}\n\nMohon konfirmasi revisi ke pihak penerbit/klien.`;
                                 
                                 navigator.clipboard.writeText(noteText);
                                 toast.success("Catatan audit disalin ke clipboard!");
                               };
 
                               return (
-                                <div className="inline-flex items-center gap-1.5 shrink-0">
-                                  <span 
-                                    title={`${rowVal.headline} (Akurasi: ${rowVal.score}%)`}
-                                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border shrink-0 ${
+                                <div className="inline-flex items-center gap-1.5 shrink-0 flex-wrap">
+                                  <button 
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedAuditDoc(doc);
+                                    }}
+                                    title="Klik untuk membuka jendela Catatan Audit"
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border shrink-0 cursor-pointer transition-all hover:scale-105 ${
                                       isG 
-                                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" 
+                                        ? hasResolved
+                                          ? "bg-sky-500/10 text-sky-400 border-sky-500/30 hover:bg-sky-500/20"
+                                          : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20" 
                                         : isY
-                                        ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                                        : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                                        ? "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
+                                        : "bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20"
                                     }`}
                                   >
                                     <span className={`w-1.5 h-1.5 rounded-full ${
-                                      isG ? "bg-emerald-400" : isY ? "bg-amber-400" : "bg-rose-400"
+                                      isG ? (hasResolved ? "bg-sky-400" : "bg-emerald-400") : isY ? "bg-amber-400" : "bg-rose-400"
                                     }`} />
-                                    {isG ? "Terverifikasi" : isY ? "Tinjau" : "Periksa"}
-                                  </span>
+                                    {isG ? (hasResolved ? "Disetujui Manual" : "Terverifikasi") : isY ? "Tinjau" : "Periksa"}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedAuditDoc(doc);
+                                    }}
+                                    title="Buka rincian catatan audit & opsi tindakan"
+                                    className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                                  >
+                                    <svg className="w-3 h-3 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                    <span>Catatan</span>
+                                  </button>
 
                                   {!isG && (
                                     <button
@@ -1184,8 +1250,8 @@ export default function Home() {
                                       title="Salin catatan audit untuk dikirim ke WhatsApp/Email"
                                       className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
                                     >
-                                      <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                                      <span>Salin Catatan</span>
+                                      <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                      <span>Salin</span>
                                     </button>
                                   )}
                                 </div>
@@ -1387,7 +1453,8 @@ export default function Home() {
                     
                     {/* 🛡️ Traffic Light System: AI Cross-Validation Banner (Premium Executive Design) */}
                     {(() => {
-                      const valResult = evaluateCrossValidation(extractedData, resolvedChecks);
+                      const docOverrides = getDocOverrides(extractedData);
+                      const valResult = evaluateCrossValidation(extractedData, docOverrides);
                       const isGreen = valResult.overallStatus === "green";
                       const isYellow = valResult.overallStatus === "yellow";
                       const isRed = valResult.overallStatus === "red";
@@ -1410,40 +1477,37 @@ export default function Home() {
                                   : "bg-rose-500/10 border-rose-500/30 text-rose-400"
                               }`}>
                                 {isGreen ? (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" /></svg>
-                                ) : isYellow ? (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                 ) : (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                                 )}
                               </div>
                               <div>
-                                <div className="flex items-center gap-2.5 flex-wrap">
-                                  <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
-                                    {valResult.headline}
-                                  </h3>
-                                  <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
-                                    isGreen
-                                      ? "bg-emerald-950 text-emerald-300 border-emerald-500/40"
-                                      : isYellow
-                                      ? "bg-amber-950 text-amber-300 border-amber-500/40"
-                                      : "bg-rose-950 text-rose-300 border-rose-500/40"
-                                  }`}>
-                                    Akurasi: {valResult.score}%
-                                  </span>
-                                </div>
-                                <p className="text-sm text-slate-300 mt-0.5 leading-relaxed">
-                                  Sistem audit AI telah menguji silang nilai nominal, rentang tanggal kalender, dan keabsahan nomor dokumen.
+                                <h3 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                                  {valResult.headline}
+                                </h3>
+                                <p className="text-xs sm:text-sm text-slate-300 mt-1 leading-relaxed">
+                                  {isGreen 
+                                    ? "Semua 4 parameter struktural polis asuransi terverifikasi akurat dan konsisten."
+                                    : isYellow
+                                    ? "Terdapat peringatan minor pada format atau nomor naskah. Periksa detail di bawah."
+                                    : "PERHATIAN: Ditemukan ketidakcocokan data penting antara klausul dan tabel angka!"}
                                 </p>
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setShowValidationDetail(!showValidationDetail)}
-                              className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 transition-all cursor-pointer shadow-sm"
-                            >
-                              {showValidationDetail ? "Tutup Rincian Audit" : "Lihat Rincian Validasi Silang"}
-                            </button>
+                            
+                            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+                              <span className="text-xs sm:text-sm font-semibold text-slate-300 px-3 py-1 rounded-full bg-slate-950 border border-slate-800">
+                                Akurasi: {valResult.score}%
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setShowValidationDetail(!showValidationDetail)}
+                                className="text-xs text-sky-400 hover:text-sky-300 font-semibold underline cursor-pointer"
+                              >
+                                {showValidationDetail ? "Sembunyikan Rincian" : "Lihat Rincian Analisis (4 Parameter)"}
+                              </button>
+                            </div>
                           </div>
 
                           {/* Accordion Rincian Validasi Silang */}
@@ -1489,17 +1553,7 @@ export default function Home() {
                                             type="button"
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              const checkId = String(c.id);
-                                              setResolvedChecks(prev => {
-                                                const currentVal = Boolean(prev[checkId]);
-                                                const next: Record<string, boolean> = { ...prev, [checkId]: !currentVal };
-                                                if (!currentVal) {
-                                                  toast.success(`${c.label} disetujui manual`);
-                                                } else {
-                                                  toast.info(`Persetujuan manual ${c.label} dibatalkan`);
-                                                }
-                                                return next;
-                                              });
+                                              toggleCheckResolve(extractedData, String(c.id), c.label);
                                             }}
                                             className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border transition-all cursor-pointer ${
                                               isResolved
@@ -2238,6 +2292,182 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* Modal Jendela Kecil: Catatan Audit Dokumen & Pilihan Tindakan */}
+      {selectedAuditDoc && (() => {
+        const docOverrides = getDocOverrides(selectedAuditDoc);
+        const modalVal = evaluateCrossValidation(selectedAuditDoc, docOverrides);
+        const isG = modalVal.overallStatus === "green";
+        const isY = modalVal.overallStatus === "yellow";
+        const hasResolved = modalVal.checks.some((c: any) => c.isResolved);
+
+        const handleCopyModalNote = () => {
+          const nonGreen = modalVal.checks.filter((c: any) => c.status !== "green");
+          const catatans = nonGreen.length > 0
+            ? nonGreen.map((c: any) => `• ${c.label}: ${c.message}`).join("\n")
+            : "• Seluruh parameter audit terverifikasi cocok dan valid.";
+          
+          const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${selectedAuditDoc.nama_klien || "-"}\nNo. Polis: ${selectedAuditDoc.nomor_identitas || "-"}\nStatus: ${isG ? (hasResolved ? "Terverifikasi Valid (Disetujui Manual)" : "Terverifikasi Valid") : isY ? "Perlu Tinjauan Ringan" : "Perhatian Khusus (Ada Selisih)"} (Akurasi: ${modalVal.score}%)\n\nRincian Temuan:\n${catatans}\n\nMohon konfirmasi ke pihak penjamin/klien.`;
+          
+          navigator.clipboard.writeText(noteText);
+          toast.success("Catatan audit disalin ke clipboard!");
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+            <div className="bg-slate-900 border border-slate-700/90 rounded-3xl shadow-2xl max-w-2xl w-full p-6 sm:p-7 animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+              {/* Modal Header */}
+              <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-800 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 border ${
+                    isG 
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" 
+                      : isY 
+                      ? "bg-amber-500/10 text-amber-400 border-amber-500/30" 
+                      : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                  }`}>
+                    {isG ? (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white tracking-tight">Catatan Audit Dokumen</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      <span className="font-semibold text-slate-200">{selectedAuditDoc.nama_klien || "-"}</span> • Polis: <span className="font-mono text-slate-300">{selectedAuditDoc.nomor_identitas || "-"}</span>
+                    </p>
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => setSelectedAuditDoc(null)} 
+                  className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Status Banner */}
+              <div className={`mt-4 p-3.5 rounded-xl border flex items-center justify-between gap-3 shrink-0 ${
+                isG 
+                  ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300"
+                  : isY
+                  ? "bg-amber-950/20 border-amber-500/30 text-amber-300"
+                  : "bg-rose-950/20 border-rose-500/30 text-rose-300"
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${isG ? (hasResolved ? "bg-sky-400" : "bg-emerald-400") : isY ? "bg-amber-400" : "bg-rose-400"}`} />
+                  <span className="text-xs sm:text-sm font-semibold">{modalVal.headline}</span>
+                </div>
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-900/80 border border-slate-700 text-white shrink-0">
+                  Akurasi: {modalVal.score}%
+                </span>
+              </div>
+
+              {/* Rincian Kasus Per Bagian Dokumen (4 Metrik) */}
+              <div className="mt-4 overflow-y-auto space-y-3 pr-1 flex-1">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Rincian Per Bagian Dokumen:</p>
+                {modalVal.checks.map((c: any) => {
+                  const checkGreen = c.status === "green";
+                  const checkYellow = c.status === "yellow";
+                  const isResolved = Boolean(c.isResolved);
+
+                  return (
+                    <div 
+                      key={c.id} 
+                      className={`p-4 rounded-xl border bg-slate-950/60 transition-all ${
+                        isResolved
+                          ? "border-sky-500/40 bg-sky-950/15"
+                          : checkGreen
+                          ? "border-emerald-500/25"
+                          : checkYellow
+                          ? "border-amber-500/30 bg-amber-950/10"
+                          : "border-rose-500/35 bg-rose-950/10"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${
+                            isResolved ? "bg-sky-400" : checkGreen ? "bg-emerald-400" : checkYellow ? "bg-amber-400" : "bg-rose-400"
+                          }`} />
+                          <span className="text-xs sm:text-sm font-bold text-white tracking-wide">
+                            {c.label}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {(c.resolvedOriginalStatus !== "green" || isResolved) && (
+                            <button
+                              type="button"
+                              onClick={() => toggleCheckResolve(selectedAuditDoc, c.id, c.label)}
+                              className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border transition-all cursor-pointer ${
+                                isResolved
+                                  ? "bg-sky-950 text-sky-300 border-sky-600/60 hover:bg-sky-900"
+                                  : "bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700"
+                              }`}
+                            >
+                              {isResolved ? "Batalkan Setujui" : "Setujui Manual"}
+                            </button>
+                          )}
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${
+                            isResolved
+                              ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                              : checkGreen
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                              : checkYellow
+                              ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                              : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                          }`}>
+                            {isResolved ? "Disetujui Manual" : checkGreen ? "Valid" : checkYellow ? "Tinjau" : "Ada Selisih"}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed pl-4">
+                        {c.message}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Modal Footer Actions */}
+              <div className="mt-5 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleCopyModalNote}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+                >
+                  <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                  <span>Salin Ringkasan (WhatsApp)</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExtractedData(selectedAuditDoc);
+                      setSelectedAuditDoc(null);
+                      toast.info(`Membuka editor & naskah OCR: ${selectedAuditDoc.nama_klien || "-"}`);
+                    }}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition-all cursor-pointer shadow-lg shadow-sky-600/25 flex items-center gap-1.5"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    <span>Buka Editor & OCR</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAuditDoc(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </main>
   );
 }
