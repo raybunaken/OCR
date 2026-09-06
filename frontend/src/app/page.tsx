@@ -1320,7 +1320,7 @@ export default function Home() {
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-800/50 text-slate-400">
                   <tr>
-                    <th className="p-4 font-medium">Tanggal</th>
+                    <th className="p-4 font-medium">Tanggal Dibuat</th>
                     <th className="p-4 font-medium">Nama Klien</th>
                     <th className="p-4 font-medium">Jenis Jaminan</th>
                     <th className="p-4 font-medium">Nilai Proyek</th>
@@ -1361,7 +1361,20 @@ export default function Home() {
                   ) : (
                     filteredDocuments.map((doc: any) => (
                       <tr key={doc.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="p-4 text-slate-300">{doc.created_at?.substring(0,10)}</td>
+                        <td className="p-4 text-slate-300">
+                          <div className="font-semibold text-slate-200 whitespace-nowrap">
+                            {doc.created_at ? doc.created_at.substring(0, 10) : "-"}
+                          </div>
+                          {doc.created_at && (
+                            <div className="text-[11px] text-slate-400 font-mono mt-0.5 whitespace-nowrap">
+                              {doc.created_at.includes("T")
+                                ? doc.created_at.substring(11, 16) + " WIB"
+                                : doc.created_at.includes(" ")
+                                ? doc.created_at.split(" ")[1]?.substring(0, 5) + " WIB"
+                                : ""}
+                            </div>
+                          )}
+                        </td>
                         <td className="p-4 font-medium text-white">
                           <div className="flex items-center gap-2.5 flex-wrap">
                             <span>{doc.nama_klien}</span>
@@ -1537,6 +1550,11 @@ export default function Home() {
                         <div className="text-xs font-bold text-white truncate flex items-center gap-2">
                           <span>{extractedData.principal || "Dokumen Aktif"}</span>
                           {extractedData.id && <span className="text-[10px] text-slate-400 font-mono">#{extractedData.id}</span>}
+                          {extractedData.created_at && (
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              • Dibuat: {extractedData.created_at.substring(0, 10)}
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-slate-400 truncate">
                           {extractedData.nomor_jaminan || "No. Polis: -"} • {extractedData.jenis_jaminan || "Surety Bond"}
@@ -2581,6 +2599,11 @@ export default function Home() {
                     <h3 className="text-lg font-bold text-white tracking-tight">Catatan Audit Dokumen</h3>
                     <p className="text-xs text-slate-400 mt-0.5">
                       <span className="font-semibold text-slate-200">{selectedAuditDoc.nama_klien || selectedAuditDoc.principal || "-"}</span> • Polis: <span className="font-mono text-slate-300">{selectedAuditDoc.nomor_identitas || selectedAuditDoc.nomor_jaminan || "-"}</span>
+                      {selectedAuditDoc.created_at && (
+                        <span className="ml-1.5 text-slate-400">
+                          • Dibuat: <span className="text-slate-300 font-mono">{selectedAuditDoc.created_at.substring(0, 10)}</span>
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -2742,6 +2765,7 @@ export default function Home() {
                         setUploadMode("single");
                         setExtractedData({
                           id: selectedAuditDoc.id,
+                          created_at: selectedAuditDoc.created_at || "",
                           principal: selectedAuditDoc.nama_klien || selectedAuditDoc.principal,
                           jenis_jaminan: selectedAuditDoc.jenis_dokumen || selectedAuditDoc.jenis_jaminan,
                           kode_jenis: selectedAuditDoc.kode_jenis || (selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("pemeliharaan") ? "MB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("uang muka") ? "APB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("penawaran") ? "BB" : "PB"),
