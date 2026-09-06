@@ -17,30 +17,47 @@ import psycopg2.extras
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+import time
 from groq import Groq
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
 load_dotenv()
+_env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
 
 GROQ_API_KEYS = [k.strip() for k in os.getenv("GROQ_API_KEY", "").split(",") if k.strip()]
 groq_clients = [Groq(api_key=k) for k in GROQ_API_KEYS]
 
-def call_groq_api(**kwargs):
+def call_groq_api(max_retries=2, backoff_seconds=3, **kwargs):
     if not groq_clients:
         raise Exception("Tidak ada GROQ_API_KEY yang dikonfigurasi.")
         
     last_exception = None
-    for i, client in enumerate(groq_clients):
-        try:
-            return client.chat.completions.create(**kwargs)
-        except Exception as e:
-            last_exception = e
-            error_str = str(e).lower()
-            if any(err in error_str for err in ["429", "rate limit", "rate_limit", "413", "503", "capacity", "over capacity", "service unavailable"]):
-                print(f"Fallback (Key {i+1} Limit/Capacity): Mencoba kunci berikutnya... Error: {e}")
+    for attempt in range(max_retries + 1):
+        for i, client in enumerate(groq_clients):
+            try:
+                return client.chat.completions.create(**kwargs)
+            except Exception as e:
+                last_exception = e
+                error_str = str(e).lower()
+                is_rate_or_capacity = any(err in error_str for err in ["429", "rate limit", "rate_limit", "413", "503", "capacity", "over capacity", "service unavailable"])
+                if is_rate_or_capacity:
+                    print(f"Key {i+1} Limit/Capacity notice: {e}")
+                    continue
+                # If non-rate error, break out immediately
+                break
+        
+        # If rate limit / capacity error occurred across all keys and retries remain
+        if attempt < max_retries and last_exception:
+            err_str = str(last_exception).lower()
+            if any(err in err_str for err in ["429", "rate limit", "rate_limit", "413", "503", "capacity", "over capacity", "service unavailable"]):
+                wait_time = backoff_seconds * (attempt + 1)
+                print(f"Menunggu {wait_time}s untuk pemulihan kuota Groq (percobaan {attempt + 2}/{max_retries + 1})...")
+                time.sleep(wait_time)
                 continue
-            break
+        break
             
     raise last_exception
 
@@ -380,7 +397,51 @@ def rapikan_teks(teks_mentah):
     return result_data
 
 
-def extract_from_image_vision(base64_image):
+def ocr_from_image_bytes(image_bytes):
+    """Mengekstrak teks mentah dari gambar menggunakan Groq Vision (qwen/qwen3.8-27b) tanpa reasoning overhead"""
+    b64_image = encode_image_bytes(image_bytes)
+    ocr_prompt = (
+        "Kamu adalah mesin OCR presisi tinggi. DILARANG membuat pembukaan, penjelasan, atau tag <think>. "
+        "Langsung transkripsikan seluruh teks dokumen dari paling atas hingga tanda tangan paling bawah secara utuh dan persis."
+    )
+    
+    # Gunakan qwen/qwen3.8-27b (direct OCR tanpa think tag, lengkap dan cepat)
+    # Gunakan max_tokens=900 agar berada aman di bawah batas 1000 OTPM Groq
+    chat = call_groq_api(
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": ocr_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}}
+                ]
+            }
+        ],
+        model="qwen/qwen3.8-27b",
+        temperature=0.0,
+        max_tokens=900
+    )
+    raw_content = chat.choices[0].message.content or ""
+    
+    # Bersihkan tag <think> jika model memunculkannya
+    if "<think>" in raw_content:
+        if "</think>" in raw_content:
+            after_think = raw_content.split("</think>", 1)[1].strip()
+            if len(after_think) > 30:
+                clean_text = after_think
+            else:
+                inside = raw_content.split("</think>", 1)[0].replace("<think>", "").strip()
+                clean_text = re.sub(r'^(?:Okay|I need to|Let\'s|The user wants|Here is|Transkripsi).*?\n', '', inside, flags=re.MULTILINE).strip()
+        else:
+            inside = raw_content.replace("<think>", "").strip()
+            clean_text = re.sub(r'^(?:Okay|I need to|Let\'s|The user wants|Here is|Transkripsi).*?\n', '', inside, flags=re.MULTILINE).strip()
+    else:
+        clean_text = raw_content.strip()
+        
+    return clean_text
+
+
+def extract_from_image_vision(image_bytes):
     """Mengekstrak teks dari gambar dengan Groq Vision lalu menstrukturkannya dengan GPT-120B"""
     fallback_data = {
         "kode_jenis": "PB", "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
@@ -389,42 +450,23 @@ def extract_from_image_vision(base64_image):
         "masa_berlaku": "-", "teks_asli": ""
     }
     if not groq_clients:
+        fallback_data["error"] = True
+        fallback_data["teks_asli"] = "GROQ_API_KEY belum dikonfigurasi di server."
         return fallback_data
         
     try:
-        # Step 1: Gunakan Qwen Vision sebagai mesin OCR murni
-        ocr_prompt = "Lakukan OCR pada gambar dokumen Surety Bond ini. Transkripsikan semua teks yang terlihat pada gambar secara lengkap, jelas, dan akurat."
-        chat = call_groq_api(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": ocr_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                    ]
-                }
-            ],
-            model="qwen/qwen3.6-27b",
-            temperature=0.1,
-            max_tokens=3000
-        )
-        raw_content = chat.choices[0].message.content
-        
-        # Bersihkan tag <think> jika ada
-        clean_text = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
-        if not clean_text:
-            clean_text = raw_content.replace("<think>", "").replace("</think>", "").strip()
-            
-        if len(clean_text) < 15:
+        clean_text = ocr_from_image_bytes(image_bytes)
+        if not clean_text or len(clean_text) < 15:
+            fallback_data["error"] = True
             fallback_data["teks_asli"] = "Tidak ada teks yang dapat dibaca dari gambar."
             return fallback_data
             
         # Step 2: Kirim teks OCR ke GPT-120B untuk ekstraksi JSON rapi
         return rapikan_teks(clean_text)
-        
     except Exception as e:
         print("ERROR GROQ VISION:", e)
-        fallback_data["teks_asli"] = "Pengekstrakan gagal: " + str(e)
+        fallback_data["error"] = True
+        fallback_data["teks_asli"] = f"Pengekstrakan gagal: {e}"
         return fallback_data
 
 
@@ -444,37 +486,22 @@ async def extract_document(file: UploadFile = File(...)):
                 data_ekstrak = rapikan_teks(teks_digital)
                 return {"status": "success", "data": data_ekstrak}
             else:
-                # PDF Scan (berisi gambar scan) -> Render dan OCR tiap halaman (hingga 5 lembar)
+                # PDF Scan (berisi gambar scan)
+                # Ambil Halaman 1 terlebih dahulu (karena halaman 1 adalah Sertifikat / Formulir Permohonan utama)
                 combined_ocr_text = ""
-                total_pages = min(len(doc), 5)
+                total_pages = min(len(doc), 3)
                 for page_idx in range(total_pages):
                     page = doc[page_idx]
                     pix = page.get_pixmap(dpi=150)
                     img_bytes = pix.tobytes("jpeg")
-                    b64_image = encode_image_bytes(img_bytes)
                     
                     try:
-                        ocr_prompt = "Lakukan OCR pada gambar dokumen Surety Bond ini. Transkripsikan semua teks yang terlihat pada gambar secara lengkap, jelas, dan akurat."
-                        chat = call_groq_api(
-                            messages=[
-                                {
-                                    "role": "user",
-                                    "content": [
-                                        {"type": "text", "text": ocr_prompt},
-                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}}
-                                    ]
-                                }
-                            ],
-                            model="qwen/qwen3.6-27b",
-                            temperature=0.1,
-                            max_tokens=3000
-                        )
-                        raw_content = chat.choices[0].message.content
-                        clean_text = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
-                        if not clean_text:
-                            clean_text = raw_content.replace("<think>", "").replace("</think>", "").strip()
-                        if clean_text:
-                            combined_ocr_text += f"\n--- Halaman {page_idx + 1} ---\n" + clean_text
+                        page_text = ocr_from_image_bytes(img_bytes)
+                        if page_text:
+                            combined_ocr_text += f"\n--- Halaman {page_idx + 1} ---\n" + page_text
+                            # Jika halaman ini sudah memuat teks pokok jaminan (>300 karakter), cukup agar hemat kuota vision
+                            if len(page_text.strip()) > 300:
+                                break
                     except Exception as ocr_err:
                         print(f"Error OCR Halaman {page_idx + 1}:", ocr_err)
                 
@@ -482,25 +509,23 @@ async def extract_document(file: UploadFile = File(...)):
                     data_ekstrak = rapikan_teks(combined_ocr_text)
                     return {"status": "success", "data": data_ekstrak}
                 else:
-                    return {"status": "success", "data": {
-                        "kode_jenis": "PB", "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
-                        "principal": "-", "obligee": "-", "pekerjaan": "-", 
-                        "tgl_terbit": "-", "tgl_awal": "-", "tgl_akhir": "-", "durasi_hk": "-",
-                        "masa_berlaku": "-", "teks_asli": "Tidak ada teks yang berhasil diekstrak."
-                    }}
+                    raise HTTPException(status_code=422, detail="Gagal membaca teks dari PDF Scan. Pastikan kualitas gambar scan cukup jelas.")
                 
         elif file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-            # Langsung kirim ke Groq Vision
-            b64_image = encode_image_bytes(contents)
-            data_ekstrak = extract_from_image_vision(b64_image)
+            # Langsung kirim bytes gambar ke pipeline OCR Vision
+            data_ekstrak = extract_from_image_vision(contents)
+            if data_ekstrak.get("error"):
+                raise HTTPException(status_code=422, detail=data_ekstrak.get("teks_asli", "Gagal mengekstrak teks dari gambar"))
             return {"status": "success", "data": data_ekstrak}
         else:
             raise HTTPException(status_code=400, detail="Format tidak didukung. Harap upload PDF, JPG, atau PNG.")
             
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Terjadi kesalahan saat memproses dokumen: {str(e)}")
 
 @app.get("/api/documents")
 def get_documents(env: Optional[str] = "production"):
@@ -557,7 +582,8 @@ def save_document(doc: DocumentUpdate):
         "tgl_terbit": doc.tgl_terbit or doc.tgl_awal or "-",
         "tgl_awal": doc.tgl_awal or "-",
         "tgl_akhir": doc.tgl_akhir or "-",
-        "durasi_hk": doc.durasi_hk or "-"
+        "durasi_hk": doc.durasi_hk or "-",
+        "waktu_input": datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     }
     sync_to_google_sheets(sheets_payload)
 
@@ -680,7 +706,8 @@ def update_document(doc_id: int, doc: DocumentUpdate):
         "tgl_terbit": doc.tgl_terbit or "-",
         "tgl_awal": doc.tgl_awal or "-",
         "tgl_akhir": doc.tgl_akhir or "-",
-        "durasi_hk": doc.durasi_hk or "-"
+        "durasi_hk": doc.durasi_hk or "-",
+        "waktu_input": datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     }
     sync_to_google_sheets(sheets_update_payload)
 
