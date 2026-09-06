@@ -86,7 +86,16 @@ export default function Home() {
       setHighlightedWord("");
       return;
     }
+    setIsEditMode(false);
     setHighlightedWord(textToFind);
+    if (typeof window !== "undefined") {
+      setTimeout(() => {
+        const mark = document.querySelector(".ocr-mark") || document.querySelector("mark");
+        if (mark) {
+          mark.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 120);
+    }
   };
 
   const renderHighlightedText = (text: string, highlight: string) => {
@@ -106,7 +115,7 @@ export default function Home() {
           <>
             {parts.map((part, i) => 
               i % 2 === 1 
-                ? <mark key={i} className="bg-yellow-400 text-slate-900 px-1 rounded font-bold shadow-lg shadow-yellow-500/20 animate-pulse">{part}</mark> 
+                ? <mark key={i} className="ocr-mark bg-yellow-400 text-slate-900 px-1 rounded font-bold shadow-lg shadow-yellow-500/30 animate-pulse">{part}</mark> 
                 : part
             )}
           </>
@@ -138,7 +147,7 @@ export default function Home() {
         <>
           {parts.map((part, i) => 
             i % 2 === 1 
-              ? <mark key={i} className="bg-yellow-300 text-slate-900 px-1 rounded shadow-sm">{part}</mark> 
+              ? <mark key={i} className="ocr-mark bg-yellow-300 text-slate-900 px-1 rounded shadow-sm">{part}</mark> 
               : part
           )}
         </>
@@ -1510,7 +1519,7 @@ export default function Home() {
                       const nonGreenChecks = valResult.checks.filter((c: any) => c.status !== "green");
 
                       return (
-                        <div className={`p-3.5 sm:p-4 rounded-2xl border transition-all mb-6 flex flex-wrap items-center justify-between gap-3 shadow-md ${
+                        <div className={`p-4 rounded-2xl border transition-all mb-6 shadow-md ${
                           isGreen
                             ? hasResolved
                               ? "bg-sky-950/25 border-sky-500/40 text-sky-200"
@@ -1519,52 +1528,99 @@ export default function Home() {
                             ? "bg-amber-950/25 border-amber-500/40 text-amber-200"
                             : "bg-rose-950/25 border-rose-500/40 text-rose-200"
                         }`}>
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
-                              isGreen
-                                ? hasResolved ? "bg-sky-500/15 border-sky-500/40 text-sky-400" : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
-                                : isYellow
-                                ? "bg-amber-500/15 border-amber-500/40 text-amber-400"
-                                : "bg-rose-500/15 border-rose-500/40 text-rose-400"
-                            }`}>
-                              {isGreen ? (
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
-                              ) : (
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-bold text-white tracking-wide">
-                                  {valResult.headline}
-                                </span>
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
-                                  isGreen
-                                    ? hasResolved ? "bg-sky-500/20 text-sky-300 border-sky-500/40" : "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                                    : isYellow
-                                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                                    : "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                                }`}>
-                                  Akurasi {valResult.score}%
-                                </span>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                                isGreen
+                                  ? hasResolved ? "bg-sky-500/15 border-sky-500/40 text-sky-400" : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
+                                  : isYellow
+                                  ? "bg-amber-500/15 border-amber-500/40 text-amber-400"
+                                  : "bg-rose-500/15 border-rose-500/40 text-rose-400"
+                              }`}>
+                                {isGreen ? (
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                ) : (
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                )}
                               </div>
-                              <p className="text-xs text-slate-300 mt-0.5 truncate">
-                                {nonGreenChecks.length > 0
-                                  ? nonGreenChecks.map((c: any) => `${c.label}: ${c.message}`).join(" • ")
-                                  : "Semua 4 parameter struktural polis asuransi terverifikasi akurat dan konsisten."}
-                              </p>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-sm font-bold text-white tracking-wide">
+                                    {valResult.headline}
+                                  </span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
+                                    isGreen
+                                      ? hasResolved ? "bg-sky-500/20 text-sky-300 border-sky-500/40" : "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                      : isYellow
+                                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                                      : "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                                  }`}>
+                                    Akurasi {valResult.score}%
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-300 mt-0.5 truncate">
+                                  {nonGreenChecks.length > 0
+                                    ? nonGreenChecks.map((c: any) => `${c.label}: ${c.message}`).join(" • ")
+                                    : "Semua 4 parameter struktural polis asuransi terverifikasi akurat dan konsisten."}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedAuditDoc(extractedData)}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                              >
+                                <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                <span>Catatan Audit & Opsi</span>
+                              </button>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedAuditDoc(extractedData)}
-                              className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-                            >
-                              <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                              <span>Catatan Audit & Opsi</span>
-                            </button>
+                          {/* Row 2: Interactive Quick-Refer Pills (Sorot Naskah Langsung 1-Klik) */}
+                          <div className="mt-3 pt-2.5 border-t border-slate-700/50 flex flex-wrap items-center gap-2">
+                            <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 shrink-0 uppercase tracking-wider">
+                              <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                              Sorot Naskah:
+                            </span>
+                            {valResult.checks.map((c: any) => {
+                              const isResolved = Boolean(c.isResolved);
+                              const isG = c.status === "green";
+                              const isY = c.status === "yellow";
+                              const isActive = highlightedWord && c.highlightTarget && highlightedWord === c.highlightTarget;
+
+                              return (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (c.highlightTarget) {
+                                      highlightInSource(c.highlightTarget);
+                                      toast.success(`Menyorot ${c.label} di naskah dokumen`);
+                                    }
+                                  }}
+                                  title={`Klik untuk langsung menyorot di naskah OCR: ${c.message}`}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 border shadow-sm ${
+                                    isActive
+                                      ? "bg-yellow-400 text-slate-900 border-yellow-300 font-bold ring-2 ring-yellow-400/50 scale-105"
+                                      : isResolved
+                                      ? "bg-sky-950/60 hover:bg-sky-900 text-sky-300 border-sky-600/50"
+                                      : isG
+                                      ? "bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700/80 hover:border-emerald-500/50"
+                                      : isY
+                                      ? "bg-amber-950/50 hover:bg-amber-900/70 text-amber-300 border-amber-600/50 hover:border-amber-400"
+                                      : "bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border-rose-600/50 hover:border-rose-400"
+                                  }`}
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                    isActive ? "bg-slate-900" : isResolved ? "bg-sky-400" : isG ? "bg-emerald-400" : isY ? "bg-amber-400" : "bg-rose-400"
+                                  }`} />
+                                  <span>{c.label}</span>
+                                  <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -2365,7 +2421,43 @@ export default function Home() {
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {c.highlightTarget && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (activeTab !== "upload") {
+                                  setUploadMode("single");
+                                  setExtractedData({
+                                    id: selectedAuditDoc.id,
+                                    principal: selectedAuditDoc.nama_klien || selectedAuditDoc.principal,
+                                    jenis_jaminan: selectedAuditDoc.jenis_dokumen || selectedAuditDoc.jenis_jaminan,
+                                    kode_jenis: selectedAuditDoc.kode_jenis || (selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("pemeliharaan") ? "MB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("uang muka") ? "APB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("penawaran") ? "BB" : "PB"),
+                                    nomor_jaminan: selectedAuditDoc.nomor_identitas || selectedAuditDoc.nomor_jaminan,
+                                    nilai_jaminan: selectedAuditDoc.nilai_proyek || selectedAuditDoc.nilai_jaminan,
+                                    obligee: selectedAuditDoc.obligee,
+                                    pekerjaan: selectedAuditDoc.pekerjaan,
+                                    masa_berlaku: selectedAuditDoc.masa_berlaku,
+                                    tgl_terbit: selectedAuditDoc.tgl_terbit || "",
+                                    tgl_awal: selectedAuditDoc.tgl_awal || "",
+                                    tgl_akhir: selectedAuditDoc.tgl_akhir || "",
+                                    durasi_hk: selectedAuditDoc.durasi_hk || "",
+                                    teks_asli: selectedAuditDoc.teks_dokumen || selectedAuditDoc.teks_asli
+                                  });
+                                  setActiveTab("upload");
+                                }
+                                setSelectedAuditDoc(null);
+                                highlightInSource(c.highlightTarget);
+                                toast.success(`Menyorot ${c.label} di naskah OCR`);
+                              }}
+                              className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-800 hover:bg-sky-600 text-sky-400 hover:text-white border border-slate-700 hover:border-sky-500 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                              title="Tutup catatan dan sorot kalimat ini di naskah dokumen OCR"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                              <span>Sorot Naskah ↗</span>
+                            </button>
+                          )}
+
                           {isResolved ? (
                             <div className="flex items-center gap-2">
                               <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-md border bg-sky-500/10 text-sky-400 border-sky-500/30 flex items-center gap-1">
