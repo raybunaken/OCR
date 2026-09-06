@@ -398,61 +398,47 @@ def rapikan_teks(teks_mentah):
 
 
 def ocr_from_image_bytes(image_bytes):
-    """Mengekstrak teks mentah dari gambar menggunakan Groq Vision (qwen/qwen3.8-27b dengan fallback ke qwen/qwen3.6-27b)"""
+    """Mengekstrak teks mentah dari gambar menggunakan Groq Vision (qwen/qwen3.8-27b) tanpa reasoning overhead"""
     b64_image = encode_image_bytes(image_bytes)
     ocr_prompt = (
         "Kamu adalah mesin OCR presisi tinggi. DILARANG membuat pembukaan, penjelasan, atau tag <think>. "
         "Langsung transkripsikan seluruh teks dokumen dari paling atas hingga tanda tangan paling bawah secara utuh dan persis."
     )
     
-    # Utamakan qwen3.8 (tidak memproduksi reasoning overhead, cepat & transkripsi utuh)
-    # Gunakan max_tokens=950 agar berada di bawah batas 1000 OTPM Groq
-    models_to_try = ["qwen/qwen3.8-27b", "qwen/qwen3.6-27b"]
-    last_err = None
+    # Gunakan qwen/qwen3.8-27b (direct OCR tanpa think tag, lengkap dan cepat)
+    # Gunakan max_tokens=900 agar berada aman di bawah batas 1000 OTPM Groq
+    chat = call_groq_api(
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": ocr_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}}
+                ]
+            }
+        ],
+        model="qwen/qwen3.8-27b",
+        temperature=0.0,
+        max_tokens=900
+    )
+    raw_content = chat.choices[0].message.content or ""
     
-    for model_name in models_to_try:
-        try:
-            chat = call_groq_api(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": ocr_prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}}
-                        ]
-                    }
-                ],
-                model=model_name,
-                temperature=0.0,
-                max_tokens=950
-            )
-            raw_content = chat.choices[0].message.content or ""
-            
-            # Bersihkan tag <think> jika ada model yang memunculkannya
-            if "<think>" in raw_content:
-                if "</think>" in raw_content:
-                    after_think = raw_content.split("</think>", 1)[1].strip()
-                    if len(after_think) > 30:
-                        clean_text = after_think
-                    else:
-                        inside = raw_content.split("</think>", 1)[0].replace("<think>", "").strip()
-                        clean_text = re.sub(r'^(?:Okay|I need to|Let\'s|The user wants|Here is|Transkripsi).*?\n', '', inside, flags=re.MULTILINE).strip()
-                else:
-                    inside = raw_content.replace("<think>", "").strip()
-                    clean_text = re.sub(r'^(?:Okay|I need to|Let\'s|The user wants|Here is|Transkripsi).*?\n', '', inside, flags=re.MULTILINE).strip()
+    # Bersihkan tag <think> jika model memunculkannya
+    if "<think>" in raw_content:
+        if "</think>" in raw_content:
+            after_think = raw_content.split("</think>", 1)[1].strip()
+            if len(after_think) > 30:
+                clean_text = after_think
             else:
-                clean_text = raw_content.strip()
-                
-            if len(clean_text) >= 15:
-                return clean_text
-        except Exception as err:
-            last_err = err
-            print(f"OCR model {model_name} notice:", err)
-            continue
-            
-    if last_err:
-        raise last_err
-    return ""
+                inside = raw_content.split("</think>", 1)[0].replace("<think>", "").strip()
+                clean_text = re.sub(r'^(?:Okay|I need to|Let\'s|The user wants|Here is|Transkripsi).*?\n', '', inside, flags=re.MULTILINE).strip()
+        else:
+            inside = raw_content.replace("<think>", "").strip()
+            clean_text = re.sub(r'^(?:Okay|I need to|Let\'s|The user wants|Here is|Transkripsi).*?\n', '', inside, flags=re.MULTILINE).strip()
+    else:
+        clean_text = raw_content.strip()
+        
+    return clean_text
 
 
 def extract_from_image_vision(image_bytes):
@@ -500,9 +486,10 @@ async def extract_document(file: UploadFile = File(...)):
                 data_ekstrak = rapikan_teks(teks_digital)
                 return {"status": "success", "data": data_ekstrak}
             else:
-                # PDF Scan (berisi gambar scan) -> Render dan OCR lembar jaminan utama (maksimal 2 halaman untuk cegah rate limit)
+                # PDF Scan (berisi gambar scan)
+                # Ambil Halaman 1 terlebih dahulu (karena halaman 1 adalah Sertifikat / Formulir Permohonan utama)
                 combined_ocr_text = ""
-                total_pages = min(len(doc), 2)
+                total_pages = min(len(doc), 3)
                 for page_idx in range(total_pages):
                     page = doc[page_idx]
                     pix = page.get_pixmap(dpi=150)
@@ -512,6 +499,9 @@ async def extract_document(file: UploadFile = File(...)):
                         page_text = ocr_from_image_bytes(img_bytes)
                         if page_text:
                             combined_ocr_text += f"\n--- Halaman {page_idx + 1} ---\n" + page_text
+                            # Jika halaman ini sudah memuat teks pokok jaminan (>300 karakter), cukup agar hemat kuota vision
+                            if len(page_text.strip()) > 300:
+                                break
                     except Exception as ocr_err:
                         print(f"Error OCR Halaman {page_idx + 1}:", ocr_err)
                 
