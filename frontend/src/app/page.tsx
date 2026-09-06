@@ -2446,8 +2446,28 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => {
-                      setExtractedData(selectedAuditDoc);
+                      setUploadMode("single");
+                      setExtractedData({
+                        id: selectedAuditDoc.id,
+                        principal: selectedAuditDoc.nama_klien,
+                        jenis_jaminan: selectedAuditDoc.jenis_dokumen,
+                        kode_jenis: selectedAuditDoc.kode_jenis || (selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("pemeliharaan") ? "MB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("uang muka") ? "APB" : selectedAuditDoc.jenis_dokumen?.toLowerCase().includes("penawaran") ? "BB" : "PB"),
+                        nomor_jaminan: selectedAuditDoc.nomor_identitas,
+                        nilai_jaminan: selectedAuditDoc.nilai_proyek,
+                        obligee: selectedAuditDoc.obligee,
+                        pekerjaan: selectedAuditDoc.pekerjaan,
+                        masa_berlaku: selectedAuditDoc.masa_berlaku,
+                        tgl_terbit: selectedAuditDoc.tgl_terbit || "",
+                        tgl_awal: selectedAuditDoc.tgl_awal || "",
+                        tgl_akhir: selectedAuditDoc.tgl_akhir || "",
+                        durasi_hk: selectedAuditDoc.durasi_hk || "",
+                        teks_asli: selectedAuditDoc.teks_dokumen
+                      });
                       setSelectedAuditDoc(null);
+                      setActiveTab("upload");
+                      if (typeof window !== "undefined") {
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }
                       toast.info(`Membuka editor & naskah OCR: ${selectedAuditDoc.nama_klien || "-"}`);
                     }}
                     className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition-all cursor-pointer shadow-lg shadow-sky-600/25 flex items-center gap-1.5"
