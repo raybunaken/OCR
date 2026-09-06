@@ -373,9 +373,13 @@ export default function Home() {
         body: formData,
       });
       const result = await res.json();
-      if (res.ok && result.status === "success") {
-        setExtractedData(result.data); // data hasil extract belum ada ID
-        toast.success("Dokumen berhasil diproses oleh AI!");
+      if (res.ok && result.status === "success" && result.data) {
+        if (result.data.error || result.data.teks_asli?.startsWith("Pengekstrakan gagal")) {
+          toast.error(`Gagal mengekstrak dokumen: ${result.data.teks_asli}`);
+        } else {
+          setExtractedData(result.data); // data hasil extract belum ada ID
+          toast.success("Dokumen berhasil diproses oleh AI!");
+        }
       } else {
         toast.error(`Gagal: ${result.detail || "Tidak dapat memproses dokumen."}`);
       }
@@ -437,7 +441,7 @@ export default function Home() {
 
       // Update item to processing
       setBatchFiles((prev) =>
-        prev.map((f, idx) => (idx === i ? { ...f, status: "processing" } : f))
+        prev.map((f, idx) => (idx === i ? { ...f, status: "processing", errorMsg: undefined } : f))
       );
 
       try {
@@ -453,6 +457,22 @@ export default function Home() {
 
         if (res.ok && result.status === "success" && result.data) {
           const extracted = result.data;
+          
+          // Pastikan hasil ekstraksi valid dan bukan kegagalan sistem
+          const isFailed = Boolean(
+            extracted.error ||
+            !extracted.teks_asli ||
+            extracted.teks_asli.startsWith("Pengekstrakan gagal") ||
+            extracted.teks_asli.startsWith("Gagal memproses") ||
+            (extracted.principal === "-" && extracted.nomor_jaminan === "-" && extracted.nilai_jaminan === "-")
+          );
+
+          if (isFailed) {
+            const errDetail = extracted.teks_asli?.startsWith("Pengekstrakan gagal")
+              ? extracted.teks_asli.split("\n")[0]
+              : "AI gagal membaca isi dokumen (teks tidak terbaca atau server sibuk).";
+            throw new Error(errDetail);
+          }
           
           // 2. Auto-Simpan ke Database & Auto-Sync Google Sheets
           const payload = {
@@ -497,9 +517,9 @@ export default function Home() {
         );
       }
 
-      // Safe pause 1.2s between requests to prevent RPM/TPM rate limits
+      // Safe pause 2.5s between requests to prevent RPM/TPM rate limits
       if (i < batchFiles.length - 1 && !stopBatchRef.current) {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
+        await new Promise((resolve) => setTimeout(resolve, 2500));
       }
     }
 
@@ -509,7 +529,9 @@ export default function Home() {
     if (successCount > 0 && errorCount === 0) {
       toast.success(`Semua ${successCount} dokumen batch berhasil diproses & disinkronkan ke Google Sheets! 🎉`);
     } else if (successCount > 0 && errorCount > 0) {
-      toast.warning(`${successCount} dokumen berhasil, ${errorCount} dokumen gagal.`);
+      toast.warning(`${successCount} dokumen berhasil, ${errorCount} dokumen gagal. Silakan klik "Coba Lagi" pada file yang gagal.`);
+    } else if (successCount === 0 && errorCount > 0) {
+      toast.error(`${errorCount} dokumen gagal diproses. Periksa koneksi atau tunggu beberapa saat lalu coba lagi.`);
     }
   };
 
@@ -538,6 +560,21 @@ export default function Home() {
 
       if (res.ok && result.status === "success" && result.data) {
         const extracted = result.data;
+        const isFailed = Boolean(
+          extracted.error ||
+          !extracted.teks_asli ||
+          extracted.teks_asli.startsWith("Pengekstrakan gagal") ||
+          extracted.teks_asli.startsWith("Gagal memproses") ||
+          (extracted.principal === "-" && extracted.nomor_jaminan === "-" && extracted.nilai_jaminan === "-")
+        );
+
+        if (isFailed) {
+          const errDetail = extracted.teks_asli?.startsWith("Pengekstrakan gagal")
+            ? extracted.teks_asli.split("\n")[0]
+            : "AI gagal membaca isi dokumen.";
+          throw new Error(errDetail);
+        }
+
         const payload = {
           nama_klien: extracted.principal || "-",
           jenis_dokumen: extracted.jenis_jaminan || "-",
