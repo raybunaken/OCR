@@ -20,7 +20,8 @@ from openpyxl.utils import get_column_letter
 import time
 from groq import Groq
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+from psycopg2.pool import ThreadedConnectionPool
 
 load_dotenv()
 _env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -64,49 +65,135 @@ def call_groq_api(max_retries=2, backoff_seconds=3, **kwargs):
 # Ambil URL Database PostgreSQL (Neon) dari environment variable
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Threaded Connection Pool Global (kapasitas 1 hingga 15 koneksi terkelola)
+db_pool = None
+
+def get_pool():
+    global db_pool
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="Database URL belum dikonfigurasi")
+    if db_pool is None:
+        db_pool = ThreadedConnectionPool(minconn=1, maxconn=15, dsn=DATABASE_URL)
+    return db_pool
+
+def check_connection_healthy(conn):
+    """Memeriksa liveness socket koneksi sebelum dipakai (menghindari error server closed pada serverless DB)."""
+    try:
+        if conn.closed or conn.status != psycopg2.extensions.STATUS_READY:
+            return False
+        res = conn.poll()
+        if res != psycopg2.extensions.POLL_OK:
+            return False
+        return True
+    except Exception:
+        return False
+
+@contextmanager
+def get_db_cursor(commit=False, dict_cursor=False):
+    """
+    Context Manager aman untuk operasi database dengan Connection Pool:
+    - Auto-reconnect jika koneksi basi/terputus saat Neon suspend.
+    - Menjamin rollback transaksi jika terjadi exception di tengah jalan.
+    - Menjamin koneksi selalu dikembalikan ke pool (zero connection leak).
+    """
+    pool = get_pool()
+    conn = None
+    fresh_connection = False
+
+    # 1. Ambil koneksi dari pool dengan pengecekan kesehatan
+    for _ in range(2):
+        try:
+            conn = pool.getconn()
+            if not check_connection_healthy(conn):
+                try:
+                    pool.putconn(conn, close=True)
+                except Exception:
+                    pass
+                conn = None
+                continue
+            break
+        except Exception:
+            conn = None
+            break
+
+    # 2. Fallback koneksi segar jika pool sedang padat / habis
+    if conn is None:
+        conn = psycopg2.connect(DATABASE_URL)
+        fresh_connection = True
+
+    try:
+        cursor_factory = psycopg2.extras.DictCursor if dict_cursor else None
+        cursor = conn.cursor(cursor_factory=cursor_factory) if cursor_factory else conn.cursor()
+        try:
+            yield cursor
+            if commit:
+                conn.commit()
+        except Exception:
+            if not conn.closed:
+                conn.rollback()
+            raise
+        finally:
+            cursor.close()
+    finally:
+        if fresh_connection:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        else:
+            try:
+                if not conn.closed:
+                    if conn.status != psycopg2.extensions.STATUS_READY:
+                        conn.rollback()
+                    pool.putconn(conn)
+                else:
+                    pool.putconn(conn, close=True)
+            except Exception:
+                pass
+
 def init_db():
     if not DATABASE_URL:
         print("WARNING: DATABASE_URL belum diatur!")
         return
-    conn = psycopg2.connect(DATABASE_URL)
-    cursor = conn.cursor()
-    
-    # Buat tabel dokumen jika belum ada
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS dokumen (
-            id SERIAL PRIMARY KEY,
-            nama_klien TEXT,
-            jenis_dokumen TEXT,
-            nomor_identitas TEXT,
-            nilai_proyek TEXT,
-            obligee TEXT,
-            pekerjaan TEXT,
-            masa_berlaku TEXT,
-            teks_dokumen TEXT,
-            created_at TIMESTAMP,
-            updated_at TIMESTAMP
-        )
-    """)
-    
-    # Auto-migration: pastikan kolom-kolom register baru tersedia
-    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS kode_jenis TEXT;")
-    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_terbit TEXT;")
-    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_awal TEXT;")
-    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_akhir TEXT;")
-    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS durasi_hk TEXT;")
-    cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS env TEXT DEFAULT 'production';")
-    
-    # Buat tabel audit_logs jika belum ada
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id SERIAL PRIMARY KEY,
-            doc_id INTEGER,
-            catatan TEXT,
-            created_at TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+    try:
+        with get_db_cursor(commit=True) as cursor:
+            # Buat tabel dokumen jika belum ada
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS dokumen (
+                    id SERIAL PRIMARY KEY,
+                    nama_klien TEXT,
+                    jenis_dokumen TEXT,
+                    nomor_identitas TEXT,
+                    nilai_proyek TEXT,
+                    obligee TEXT,
+                    pekerjaan TEXT,
+                    masa_berlaku TEXT,
+                    teks_dokumen TEXT,
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP
+                )
+            """)
+            
+            # Auto-migration: pastikan kolom-kolom register baru tersedia
+            cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS kode_jenis TEXT;")
+            cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_terbit TEXT;")
+            cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_awal TEXT;")
+            cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_akhir TEXT;")
+            cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS durasi_hk TEXT;")
+            cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS env TEXT DEFAULT 'production';")
+            
+            # Buat tabel audit_logs jika belum ada
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id SERIAL PRIMARY KEY,
+                    doc_id INTEGER,
+                    catatan TEXT,
+                    created_at TIMESTAMP
+                )
+            """)
+        print("DATABASE INITIALIZED & POOL READY.")
+    except Exception as e:
+        print("INIT DB NOTICE:", e)
 
 def sync_to_google_sheets(payload):
     def _worker():
@@ -123,10 +210,17 @@ def sync_to_google_sheets(payload):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Inisialisasi Database Tables
+    # Startup: Inisialisasi Database Tables & Connection Pool
     init_db()
     yield
-    # Shutdown
+    # Shutdown: Tutup seluruh koneksi pool secara rapi
+    global db_pool
+    if db_pool is not None:
+        try:
+            db_pool.closeall()
+            print("DATABASE CONNECTION POOL CLOSED.")
+        except Exception as e:
+            print("Notice closing db pool:", e)
 
 app = FastAPI(title="Insurance CRM API", lifespan=lifespan)
 
@@ -529,40 +623,35 @@ async def extract_document(file: UploadFile = File(...)):
 
 @app.get("/api/documents")
 def get_documents(env: Optional[str] = "production"):
-    conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    if env == "testing":
-        cursor.execute("SELECT * FROM dokumen WHERE env='testing' ORDER BY id DESC")
-    else:
-        cursor.execute("SELECT * FROM dokumen WHERE env='production' OR env IS NULL ORDER BY id DESC")
-    docs = cursor.fetchall()
-    conn.close()
-    return [dict(ix) for ix in docs]
+    with get_db_cursor(dict_cursor=True) as cursor:
+        if env == "testing":
+            cursor.execute("SELECT * FROM dokumen WHERE env='testing' ORDER BY id DESC")
+        else:
+            cursor.execute("SELECT * FROM dokumen WHERE env='production' OR env IS NULL ORDER BY id DESC")
+        docs = cursor.fetchall()
+        return [dict(ix) for ix in docs]
 
 @app.post("/api/documents")
 def save_document(doc: DocumentUpdate):
     waktu_sekarang = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     doc_env = doc.env or "production"
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO dokumen (
-            nama_klien, jenis_dokumen, nomor_identitas, nilai_proyek, 
-            obligee, pekerjaan, masa_berlaku, teks_dokumen, 
-            kode_jenis, tgl_terbit, tgl_awal, tgl_akhir, durasi_hk,
-            created_at, updated_at, env
-        ) 
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING id
-    """, (
-        doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, 
-        doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, 
-        doc.kode_jenis, doc.tgl_terbit, doc.tgl_awal, doc.tgl_akhir, doc.durasi_hk,
-        waktu_sekarang, waktu_sekarang, doc_env
-    ))
-    new_doc_id = cursor.fetchone()[0]
-    conn.commit()
-    conn.close()
+    with get_db_cursor(commit=True) as cursor:
+        cursor.execute("""
+            INSERT INTO dokumen (
+                nama_klien, jenis_dokumen, nomor_identitas, nilai_proyek, 
+                obligee, pekerjaan, masa_berlaku, teks_dokumen, 
+                kode_jenis, tgl_terbit, tgl_awal, tgl_akhir, durasi_hk,
+                created_at, updated_at, env
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, 
+            doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, 
+            doc.kode_jenis, doc.tgl_terbit, doc.tgl_awal, doc.tgl_akhir, doc.durasi_hk,
+            waktu_sekarang, waktu_sekarang, doc_env
+        ))
+        new_doc_id = cursor.fetchone()[0]
 
     # Trigger Live Sync to Google Sheets
     sheets_payload = {
@@ -592,16 +681,16 @@ def save_document(doc: DocumentUpdate):
 @app.delete("/api/documents/{doc_id}")
 def delete_document(doc_id: int):
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cursor.execute("SELECT * FROM dokumen WHERE id=%s", (doc_id,))
-        doc = cursor.fetchone()
-        
-        cursor.execute("DELETE FROM audit_logs WHERE doc_id=%s", (doc_id,))
-        cursor.execute("DELETE FROM dokumen WHERE id=%s", (doc_id,))
-        conn.commit()
-        conn.close()
-        
+        doc = None
+        with get_db_cursor(commit=True, dict_cursor=True) as cursor:
+            cursor.execute("SELECT * FROM dokumen WHERE id=%s", (doc_id,))
+            row = cursor.fetchone()
+            if row:
+                doc = dict(row)
+            
+            cursor.execute("DELETE FROM audit_logs WHERE doc_id=%s", (doc_id,))
+            cursor.execute("DELETE FROM dokumen WHERE id=%s", (doc_id,))
+            
         # Sinkronisasi HAPUS ke Google Sheets
         if doc:
             doc_env = doc["env"] if "env" in doc.keys() and doc["env"] else "production"
@@ -625,66 +714,61 @@ def delete_document(doc_id: int):
 @app.put("/api/documents/{doc_id}")
 def update_document(doc_id: int, doc: DocumentUpdate):
     waktu_sekarang = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    # 1. Ambil data lama
-    cursor.execute("SELECT * FROM dokumen WHERE id=%s", (doc_id,))
-    old_data = cursor.fetchone()
-    if not old_data:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan")
+    with get_db_cursor(commit=True, dict_cursor=True) as cursor:
+        # 1. Ambil data lama
+        cursor.execute("SELECT * FROM dokumen WHERE id=%s", (doc_id,))
+        old_data = cursor.fetchone()
+        if not old_data:
+            raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan")
+            
+        old_data_dict = dict(old_data)
         
-    old_data_dict = dict(old_data)
-    
-    # 2. Bandingkan data untuk mencari perubahan
-    perubahan = []
-    field_map = {
-        "nama_klien": ("Nama Klien", doc.nama_klien),
-        "jenis_dokumen": ("Jenis Jaminan", doc.jenis_dokumen),
-        "nomor_identitas": ("Nomor Jaminan", doc.nomor_identitas),
-        "nilai_proyek": ("Nilai Jaminan", doc.nilai_proyek),
-        "obligee": ("Obligee", doc.obligee),
-        "pekerjaan": ("Pekerjaan", doc.pekerjaan),
-        "masa_berlaku": ("Masa Berlaku", doc.masa_berlaku),
-        "kode_jenis": ("Kode Jenis Bond", doc.kode_jenis),
-        "tgl_terbit": ("Tanggal Terbit", doc.tgl_terbit),
-        "tgl_awal": ("Tanggal Awal", doc.tgl_awal),
-        "tgl_akhir": ("Tanggal Akhir", doc.tgl_akhir),
-        "durasi_hk": ("Durasi HK", doc.durasi_hk)
-    }
-    
-    for key, (label, new_val) in field_map.items():
-        old_val = old_data_dict.get(key)
-        if str(old_val).strip() != str(new_val).strip():
-            perubahan.append(f"{label} diubah dari '{old_val}' menjadi '{new_val}'")
-            
-    # Track Teks Asli
-    if str(old_data_dict.get("teks_dokumen")).strip() != str(doc.teks_dokumen).strip():
-        perubahan.append("Teks Asli Dokumen telah diubah / diedit secara manual")
-            
-    # 3. Jika ada perubahan, catat ke audit_logs
-    if perubahan:
-        catatan_lengkap = " | ".join(perubahan)
-        cursor.execute("INSERT INTO audit_logs (doc_id, catatan, created_at) VALUES (%s, %s, %s)", (doc_id, catatan_lengkap, waktu_sekarang))
-    
-    # 4. Update tabel dokumen
-    cursor.execute("""
-        UPDATE dokumen 
-        SET nama_klien=%s, jenis_dokumen=%s, nomor_identitas=%s, nilai_proyek=%s, 
-            obligee=%s, pekerjaan=%s, masa_berlaku=%s, teks_dokumen=%s, 
-            kode_jenis=%s, tgl_terbit=%s, tgl_awal=%s, tgl_akhir=%s, durasi_hk=%s,
-            updated_at=%s
-        WHERE id=%s
-    """, (
-        doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, 
-        doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, 
-        doc.kode_jenis, doc.tgl_terbit, doc.tgl_awal, doc.tgl_akhir, doc.durasi_hk,
-        waktu_sekarang, doc_id
-    ))
-    
-    conn.commit()
-    conn.close()
+        # 2. Bandingkan data untuk mencari perubahan
+        perubahan = []
+        field_map = {
+            "nama_klien": ("Nama Klien", doc.nama_klien),
+            "jenis_dokumen": ("Jenis Jaminan", doc.jenis_dokumen),
+            "nomor_identitas": ("Nomor Jaminan", doc.nomor_identitas),
+            "nilai_proyek": ("Nilai Jaminan", doc.nilai_proyek),
+            "obligee": ("Obligee", doc.obligee),
+            "pekerjaan": ("Pekerjaan", doc.pekerjaan),
+            "masa_berlaku": ("Masa Berlaku", doc.masa_berlaku),
+            "kode_jenis": ("Kode Jenis Bond", doc.kode_jenis),
+            "tgl_terbit": ("Tanggal Terbit", doc.tgl_terbit),
+            "tgl_awal": ("Tanggal Awal", doc.tgl_awal),
+            "tgl_akhir": ("Tanggal Akhir", doc.tgl_akhir),
+            "durasi_hk": ("Durasi HK", doc.durasi_hk)
+        }
+        
+        for key, (label, new_val) in field_map.items():
+            old_val = old_data_dict.get(key)
+            if str(old_val).strip() != str(new_val).strip():
+                perubahan.append(f"{label} diubah dari '{old_val}' menjadi '{new_val}'")
+                
+        # Track Teks Asli
+        if str(old_data_dict.get("teks_dokumen")).strip() != str(doc.teks_dokumen).strip():
+            perubahan.append("Teks Asli Dokumen telah diubah / diedit secara manual")
+                
+        # 3. Jika ada perubahan, catat ke audit_logs
+        if perubahan:
+            catatan_lengkap = " | ".join(perubahan)
+            cursor.execute("INSERT INTO audit_logs (doc_id, catatan, created_at) VALUES (%s, %s, %s)", (doc_id, catatan_lengkap, waktu_sekarang))
+        
+        # 4. Update tabel dokumen
+        cursor.execute("""
+            UPDATE dokumen 
+            SET nama_klien=%s, jenis_dokumen=%s, nomor_identitas=%s, nilai_proyek=%s, 
+                obligee=%s, pekerjaan=%s, masa_berlaku=%s, teks_dokumen=%s, 
+                kode_jenis=%s, tgl_terbit=%s, tgl_awal=%s, tgl_akhir=%s, durasi_hk=%s,
+                updated_at=%s
+            WHERE id=%s
+        """, (
+            doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, 
+            doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, 
+            doc.kode_jenis, doc.tgl_terbit, doc.tgl_awal, doc.tgl_akhir, doc.durasi_hk,
+            waktu_sekarang, doc_id
+        ))
 
     # 5. Sinkronisasi UPDATE ke Google Sheets
     doc_env = doc.env or old_data_dict.get("env") or "production"
@@ -715,28 +799,23 @@ def update_document(doc_id: int, doc: DocumentUpdate):
 
 @app.get("/api/documents/{doc_id}/logs")
 def get_audit_logs(doc_id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("SELECT * FROM audit_logs WHERE doc_id=%s ORDER BY id DESC", (doc_id,))
-    logs = cursor.fetchall()
-    conn.close()
-    
-    # Convert datetime objects to string if psycopg2 returns datetime
-    result = []
-    for log in logs:
-        log_dict = dict(log)
-        if isinstance(log_dict['created_at'], datetime.datetime):
-             log_dict['created_at'] = log_dict['created_at'].strftime("%Y-%m-%d %H:%M:%S")
-        result.append(log_dict)
-    return result
+    with get_db_cursor(dict_cursor=True) as cursor:
+        cursor.execute("SELECT * FROM audit_logs WHERE doc_id=%s ORDER BY id DESC", (doc_id,))
+        logs = cursor.fetchall()
+        
+        result = []
+        for log in logs:
+            log_dict = dict(log)
+            if isinstance(log_dict['created_at'], datetime.datetime):
+                log_dict['created_at'] = log_dict['created_at'].strftime("%Y-%m-%d %H:%M:%S")
+            result.append(log_dict)
+        return result
 
 @app.get("/api/documents/export/excel")
 def export_documents_excel():
-    conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("SELECT * FROM dokumen ORDER BY id ASC")
-    docs = cursor.fetchall()
-    conn.close()
+    with get_db_cursor(dict_cursor=True) as cursor:
+        cursor.execute("SELECT * FROM dokumen ORDER BY id ASC")
+        docs = cursor.fetchall()
 
     wb = openpyxl.Workbook()
     ws = wb.active
