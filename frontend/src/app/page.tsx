@@ -464,12 +464,18 @@ export default function Home() {
             !extracted.teks_asli ||
             extracted.teks_asli.startsWith("Pengekstrakan gagal") ||
             extracted.teks_asli.startsWith("Gagal memproses") ||
+            extracted.teks_asli.includes("Tidak ada teks yang berhasil diekstrak") ||
+            extracted.teks_asli.includes("429") ||
+            extracted.teks_asli.includes("rate_limit") ||
+            extracted.teks_asli.includes("Rate limit") ||
             (extracted.principal === "-" && extracted.nomor_jaminan === "-" && extracted.nilai_jaminan === "-")
           );
 
           if (isFailed) {
             const errDetail = extracted.teks_asli?.startsWith("Pengekstrakan gagal")
               ? extracted.teks_asli.split("\n")[0]
+              : extracted.teks_asli?.includes("Tidak ada teks yang berhasil diekstrak")
+              ? "Teks dokumen tidak berhasil dibaca oleh AI."
               : "AI gagal membaca isi dokumen (teks tidak terbaca atau server sibuk).";
             throw new Error(errDetail);
           }
@@ -565,12 +571,18 @@ export default function Home() {
           !extracted.teks_asli ||
           extracted.teks_asli.startsWith("Pengekstrakan gagal") ||
           extracted.teks_asli.startsWith("Gagal memproses") ||
+          extracted.teks_asli.includes("Tidak ada teks yang berhasil diekstrak") ||
+          extracted.teks_asli.includes("429") ||
+          extracted.teks_asli.includes("rate_limit") ||
+          extracted.teks_asli.includes("Rate limit") ||
           (extracted.principal === "-" && extracted.nomor_jaminan === "-" && extracted.nilai_jaminan === "-")
         );
 
         if (isFailed) {
           const errDetail = extracted.teks_asli?.startsWith("Pengekstrakan gagal")
             ? extracted.teks_asli.split("\n")[0]
+            : extracted.teks_asli?.includes("Tidak ada teks yang berhasil diekstrak")
+            ? "Teks dokumen tidak berhasil dibaca oleh AI."
             : "AI gagal membaca isi dokumen.";
           throw new Error(errDetail);
         }
