@@ -1585,7 +1585,7 @@ export default function Home() {
                       </div>
                       <div className="min-w-0">
                         <div className="text-xs font-bold text-white truncate flex items-center gap-2">
-                          <span>{extractedData.principal || "Dokumen Aktif"}</span>
+                          <span>{extractedData.principal && extractedData.principal !== "-" ? extractedData.principal : "Dokumen Aktif"}</span>
                           {extractedData.id && <span className="text-[10px] text-slate-400 font-mono">#{extractedData.id}</span>}
                           {extractedData.created_at && (
                             <span className="text-[10px] text-slate-400 font-mono">
@@ -1594,7 +1594,7 @@ export default function Home() {
                           )}
                         </div>
                         <div className="text-[11px] text-slate-400 truncate">
-                          {extractedData.nomor_jaminan || "No. Polis: -"} • {extractedData.jenis_jaminan || "Surety Bond"}
+                          {extractedData.nomor_jaminan && extractedData.nomor_jaminan !== "-" ? extractedData.nomor_jaminan : "No. Polis: -"} • {extractedData.jenis_jaminan && extractedData.jenis_jaminan !== "-" ? extractedData.jenis_jaminan : "Surety Bond"}
                         </div>
                       </div>
                     </div>
@@ -1896,6 +1896,26 @@ export default function Home() {
                                 </div>
                               );
                             })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Smart Advisory for Attachment / Signature Pages */}
+                    {(() => {
+                      const isAttachmentPage = Boolean(
+                        extractedData.teks_asli &&
+                        (extractedData.teks_asli.includes("PERJANJIAN GANTI RUGI") || extractedData.teks_asli.includes("Page 2 of 2")) &&
+                        (!extractedData.nomor_jaminan || extractedData.nomor_jaminan === "-")
+                      );
+                      if (!isAttachmentPage) return null;
+                      return (
+                        <div className="mb-6 p-3.5 rounded-2xl bg-amber-950/30 border border-amber-500/40 flex items-start gap-3 text-xs text-amber-200/90 shadow-sm animate-in fade-in">
+                          <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <div className="leading-relaxed">
+                            <span className="font-bold text-amber-300">Catatan Dokumen:</span> Naskah ini terdeteksi sebagai <strong>Lembar Perjanjian Ganti Rugi / Tanda Tangan (Lampiran)</strong>. Nomor jaminan, obligee, dan nilai proyek tercantum pada <strong>Sertifikat Jaminan / Halaman 1</strong>. Anda dapat melengkapi kolom secara manual di bawah ini atau mengunggah lembar utama.
                           </div>
                         </div>
                       );
