@@ -100,7 +100,7 @@ export default function Home() {
       ? (hasResolved ? "Terverifikasi Valid (Disetujui Manual)" : "Terverifikasi Valid") 
       : isY ? "Perlu Tinjauan Ringan" : "Perhatian Khusus (Ada Selisih)";
 
-    const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${clientName}\nNo. Polis: ${policeNo}\nStatus: ${statusText} (Akurasi: ${val.score}%)\n\nRincian Temuan:\n${catatans}\n\nMohon konfirmasi revisi ke pihak penjamin/klien.`;
+    const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${clientName}\nNo. Polis: ${policeNo}\nStatus: ${statusText} (Akurasi: ${val.score}%)\n\nRincian Temuan:\n${catatans}`;
     
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(noteText);
@@ -288,44 +288,19 @@ export default function Home() {
   // States untuk Pencarian Ultimate & Filter
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("Semua");
+  const [filterStatus, setFilterStatus] = useState("Semua");
   const [filterMonth, setFilterMonth] = useState("Semua");
   const [sortBy, setSortBy] = useState("Terbaru");
 
   const resetFilters = () => {
     setSearchQuery("");
     setFilterType("Semua");
+    setFilterStatus("Semua");
     setFilterMonth("Semua");
     setSortBy("Terbaru");
   };
 
-  const isFiltered = searchQuery !== "" || filterType !== "Semua" || filterMonth !== "Semua" || sortBy !== "Terbaru";
-
-  // Filter & Sort Otomatis (Real-time)
-  const filteredDocuments = documents.filter((doc) => {
-    const query = searchQuery.toLowerCase().trim();
-    const matchesSearch = !query ? true : (
-      (doc.nama_klien?.toLowerCase() || "").includes(query) || 
-      (doc.nilai_proyek?.toLowerCase() || "").includes(query) ||
-      (doc.nomor_identitas?.toLowerCase() || "").includes(query) ||
-      (doc.obligee?.toLowerCase() || "").includes(query) ||
-      (doc.pekerjaan?.toLowerCase() || "").includes(query)
-    );
-    const matchesType = filterType === "Semua" ? true : doc.jenis_dokumen?.toLowerCase().includes(filterType.toLowerCase());
-    
-    // Asumsi doc.created_at formatnya "YYYY-MM-DD HH:MM:SS"
-    const docMonth = doc.created_at ? doc.created_at.substring(5, 7) : "";
-    const matchesMonth = filterMonth === "Semua" ? true : docMonth === filterMonth;
-    
-    return matchesSearch && matchesType && matchesMonth;
-  }).sort((a, b) => {
-    if (sortBy === "Terbaru") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    if (sortBy === "Terlama") return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-    if (sortBy === "Nilai Tertinggi") return parseNumericValue(b.nilai_proyek) - parseNumericValue(a.nilai_proyek);
-    if (sortBy === "Nilai Terendah") return parseNumericValue(a.nilai_proyek) - parseNumericValue(b.nilai_proyek);
-    if (sortBy === "Nama (A-Z)") return (a.nama_klien || "").localeCompare(b.nama_klien || "");
-    if (sortBy === "Nama (Z-A)") return (b.nama_klien || "").localeCompare(a.nama_klien || "");
-    return 0;
-  });
+  const isFiltered = searchQuery !== "" || filterType !== "Semua" || filterStatus !== "Semua" || filterMonth !== "Semua" || sortBy !== "Terbaru";
 
 
 
@@ -1045,6 +1020,50 @@ export default function Home() {
     };
   };
 
+  // Filter & Sort Otomatis (Real-time) dengan Dukungan Filter Status
+  const filteredDocuments = documents.filter((doc) => {
+    const query = searchQuery.toLowerCase().trim();
+    const matchesSearch = !query ? true : (
+      (doc.nama_klien?.toLowerCase() || "").includes(query) || 
+      (doc.nilai_proyek?.toLowerCase() || "").includes(query) ||
+      (doc.nomor_identitas?.toLowerCase() || "").includes(query) ||
+      (doc.obligee?.toLowerCase() || "").includes(query) ||
+      (doc.pekerjaan?.toLowerCase() || "").includes(query)
+    );
+    const matchesType = filterType === "Semua" ? true : doc.jenis_dokumen?.toLowerCase().includes(filterType.toLowerCase());
+    
+    // Asumsi doc.created_at formatnya "YYYY-MM-DD HH:MM:SS"
+    const docMonth = doc.created_at ? doc.created_at.substring(5, 7) : "";
+    const matchesMonth = filterMonth === "Semua" ? true : docMonth === filterMonth;
+
+    let matchesStatus = true;
+    if (filterStatus !== "Semua") {
+      const docOverrides = getDocOverrides(doc);
+      const rowVal = evaluateCrossValidation(doc, docOverrides);
+      const isG = rowVal.overallStatus === "green";
+      const isY = rowVal.overallStatus === "yellow";
+      const isR = rowVal.overallStatus === "red";
+
+      if (filterStatus === "Terverifikasi") {
+        matchesStatus = isG;
+      } else if (filterStatus === "Tinjau") {
+        matchesStatus = isY;
+      } else if (filterStatus === "Perhatian") {
+        matchesStatus = isR;
+      }
+    }
+    
+    return matchesSearch && matchesType && matchesMonth && matchesStatus;
+  }).sort((a, b) => {
+    if (sortBy === "Terbaru") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    if (sortBy === "Terlama") return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    if (sortBy === "Nilai Tertinggi") return parseNumericValue(b.nilai_proyek) - parseNumericValue(a.nilai_proyek);
+    if (sortBy === "Nilai Terendah") return parseNumericValue(a.nilai_proyek) - parseNumericValue(b.nilai_proyek);
+    if (sortBy === "Nama (A-Z)") return (a.nama_klien || "").localeCompare(b.nama_klien || "");
+    if (sortBy === "Nama (Z-A)") return (b.nama_klien || "").localeCompare(a.nama_klien || "");
+    return 0;
+  });
+
   const fetchAuditLogs = async (docId: number) => {
     try {
       const res = await fetch(`${API_URL}/api/documents/${docId}/logs`);
@@ -1153,23 +1172,23 @@ export default function Home() {
         <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
           <button 
             onClick={handleOpenSpreadsheet}
-            className="px-4 py-2.5 rounded-full text-xs font-bold bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/50 hover:border-emerald-400 transition-all flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-950/40"
+            className="px-5 py-2.5 rounded-full text-sm font-bold bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/60 hover:border-emerald-400 transition-all flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-950/40"
             title="Buka Google Spreadsheet kantor di tab baru"
           >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span>Buka Google Sheets ↗</span>
           </button>
 
           <div className="glass-panel rounded-full p-1.5 flex gap-2 shadow-lg shadow-black/20">
             <button 
               onClick={() => setActiveTab("dashboard")}
-              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${activeTab === "dashboard" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
+              className={`px-7 py-2.5 rounded-full text-sm sm:text-base font-semibold transition-all cursor-pointer ${activeTab === "dashboard" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
             >
               Dashboard
             </button>
             <button 
               onClick={() => setActiveTab("upload")}
-              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${activeTab === "upload" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
+              className={`px-7 py-2.5 rounded-full text-sm sm:text-base font-semibold transition-all cursor-pointer ${activeTab === "upload" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-slate-300 hover:text-white"}`}
             >
               Upload Dokumen
             </button>
@@ -1221,12 +1240,12 @@ export default function Home() {
                   <p className="text-slate-400 text-xs sm:text-sm mt-1">Daftar seluruh riwayat dokumen asuransi yang tersimpan</p>
                 </div>
 
-                <div className="flex items-center gap-2 self-stretch sm:self-auto">
+                <div className="flex items-center gap-2.5 self-stretch sm:self-auto">
                   <button
                     type="button"
                     onClick={fetchDocuments}
                     disabled={isLoadingDocs}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all border border-slate-700 hover:border-slate-600 cursor-pointer flex items-center gap-2 justify-center disabled:opacity-50"
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-5 py-3 rounded-xl text-xs sm:text-sm font-bold transition-all border border-slate-700 hover:border-slate-600 cursor-pointer flex items-center gap-2 justify-center disabled:opacity-50 shadow-sm"
                     title="Segarkan data dokumen dari server"
                   >
                     <svg className={`w-4 h-4 text-sky-400 ${isLoadingDocs ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1239,7 +1258,7 @@ export default function Home() {
                     href={`${API_URL}/api/documents/export/excel`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/25 flex items-center gap-2 border border-emerald-400/40 cursor-pointer justify-center flex-1 sm:flex-initial"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2 border border-emerald-400/40 cursor-pointer justify-center flex-1 sm:flex-initial"
                   >
                     <svg className="w-4 h-4 text-emerald-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1250,35 +1269,49 @@ export default function Home() {
               </div>
 
               {/* Filters & Search Control Bar */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-12 gap-3.5 pt-2">
                 {/* Search Bar */}
-                <div className="sm:col-span-2 lg:col-span-4 relative">
+                <div className="sm:col-span-2 md:col-span-3 lg:col-span-3 relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                    <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                   </div>
                   <input 
                     type="text" 
                     placeholder="Cari klien, nomor, obligee, proyek..." 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full glass-input rounded-xl pl-10 pr-10 py-2.5 text-sm bg-slate-900/60 border border-slate-700/80 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 transition-all placeholder:text-slate-500" 
+                    className="w-full glass-input rounded-xl pl-10 pr-10 py-3 text-sm sm:text-base bg-slate-900/80 border border-slate-700/90 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 transition-all placeholder:text-slate-500 text-white font-medium shadow-inner" 
                   />
                   {searchQuery && (
                     <button 
                       onClick={() => setSearchQuery("")}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white"
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-white cursor-pointer"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   )}
                 </div>
 
+                {/* Filter: Status Audit (Terverifikasi, Tinjau, dll) */}
+                <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 relative">
+                  <select 
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    className="w-full glass-input rounded-xl px-4 py-3 text-sm sm:text-base font-semibold bg-slate-900 border border-slate-700/90 focus:border-sky-400 cursor-pointer text-slate-200 shadow-inner"
+                  >
+                    <option value="Semua" className="bg-slate-900 text-slate-200">Semua Status</option>
+                    <option value="Terverifikasi" className="bg-slate-900 text-emerald-400 font-bold">🟢 Terverifikasi</option>
+                    <option value="Tinjau" className="bg-slate-900 text-amber-400 font-bold">🟡 Perlu Tinjau</option>
+                    <option value="Perhatian" className="bg-slate-900 text-rose-400 font-bold">🔴 Perhatian Khusus</option>
+                  </select>
+                </div>
+
                 {/* Filter: Jenis Jaminan */}
-                <div className="lg:col-span-3 relative">
+                <div className="sm:col-span-1 md:col-span-2 lg:col-span-3 relative">
                   <select 
                     value={filterType}
                     onChange={(e) => setFilterType(e.target.value)}
-                    className="w-full glass-input rounded-xl px-4 py-2.5 text-sm bg-slate-900 border border-slate-700/80 focus:border-sky-400 cursor-pointer text-slate-200"
+                    className="w-full glass-input rounded-xl px-4 py-3 text-sm sm:text-base font-medium bg-slate-900 border border-slate-700/90 focus:border-sky-400 cursor-pointer text-slate-200 shadow-inner"
                   >
                     <option value="Semua" className="bg-slate-900 text-slate-200">Semua Jenis Jaminan</option>
                     <option value="Pelaksanaan" className="bg-slate-900 text-slate-200">Jaminan Pelaksanaan</option>
@@ -1289,11 +1322,11 @@ export default function Home() {
                 </div>
 
                 {/* Filter: Bulan */}
-                <div className="lg:col-span-2 relative">
+                <div className="sm:col-span-1 md:col-span-1 lg:col-span-2 relative">
                   <select 
                     value={filterMonth}
                     onChange={(e) => setFilterMonth(e.target.value)}
-                    className="w-full glass-input rounded-xl px-4 py-2.5 text-sm bg-slate-900 border border-slate-700/80 focus:border-sky-400 cursor-pointer text-slate-200"
+                    className="w-full glass-input rounded-xl px-4 py-3 text-sm sm:text-base font-medium bg-slate-900 border border-slate-700/90 focus:border-sky-400 cursor-pointer text-slate-200 shadow-inner"
                   >
                     <option value="Semua" className="bg-slate-900 text-slate-200">Semua Bulan</option>
                     <option value="01" className="bg-slate-900 text-slate-200">Januari</option>
@@ -1312,53 +1345,59 @@ export default function Home() {
                 </div>
 
                 {/* Sort By */}
-                <div className="lg:col-span-3 relative">
+                <div className="sm:col-span-1 md:col-span-2 lg:col-span-2 relative">
                   <select 
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value)}
-                    className="w-full glass-input rounded-xl px-4 py-2.5 text-sm bg-slate-900 border border-slate-700/80 focus:border-sky-400 cursor-pointer text-slate-200"
+                    className="w-full glass-input rounded-xl px-4 py-3 text-sm sm:text-base font-medium bg-slate-900 border border-slate-700/90 focus:border-sky-400 cursor-pointer text-slate-200 shadow-inner"
                   >
-                    <option value="Terbaru" className="bg-slate-900 text-slate-200">Urutkan: Paling Baru</option>
-                    <option value="Terlama" className="bg-slate-900 text-slate-200">Urutkan: Paling Lama</option>
-                    <option value="Nilai Tertinggi" className="bg-slate-900 text-slate-200">Urutkan: Nilai Tertinggi</option>
-                    <option value="Nilai Terendah" className="bg-slate-900 text-slate-200">Urutkan: Nilai Terendah</option>
-                    <option value="Nama (A-Z)" className="bg-slate-900 text-slate-200">Urutkan: Klien (A → Z)</option>
-                    <option value="Nama (Z-A)" className="bg-slate-900 text-slate-200">Urutkan: Klien (Z → A)</option>
+                    <option value="Terbaru" className="bg-slate-900 text-slate-200">Urut: Paling Baru</option>
+                    <option value="Terlama" className="bg-slate-900 text-slate-200">Urut: Paling Lama</option>
+                    <option value="Nilai Tertinggi" className="bg-slate-900 text-slate-200">Urut: Nilai Tertinggi</option>
+                    <option value="Nilai Terendah" className="bg-slate-900 text-slate-200">Urut: Nilai Terendah</option>
+                    <option value="Nama (A-Z)" className="bg-slate-900 text-slate-200">Urut: Klien (A → Z)</option>
+                    <option value="Nama (Z-A)" className="bg-slate-900 text-slate-200">Urut: Klien (Z → A)</option>
                   </select>
                 </div>
               </div>
 
               {/* Active Filter Chips / Reset */}
               {isFiltered && (
-                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/80">
-                  <span className="text-xs text-slate-400 font-medium">Filter Aktif:</span>
+                <div className="flex flex-wrap items-center gap-2.5 pt-1.5 border-t border-slate-800/80">
+                  <span className="text-xs text-slate-400 font-semibold">Filter Aktif:</span>
                   {searchQuery && (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-sky-900/40 text-sky-300 border border-sky-700/50">
+                    <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold bg-sky-900/40 text-sky-300 border border-sky-700/50">
                       Pencarian: "{searchQuery}"
                       <button onClick={() => setSearchQuery("")} className="hover:text-white cursor-pointer">✕</button>
                     </span>
                   )}
+                  {filterStatus !== "Semua" && (
+                    <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700/50">
+                      Status: {filterStatus === "Terverifikasi" ? "Terverifikasi" : filterStatus === "Tinjau" ? "Perlu Tinjau" : "Perhatian Khusus"}
+                      <button onClick={() => setFilterStatus("Semua")} className="hover:text-white cursor-pointer">✕</button>
+                    </span>
+                  )}
                   {filterType !== "Semua" && (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-900/40 text-indigo-300 border border-indigo-700/50">
+                    <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold bg-indigo-900/40 text-indigo-300 border border-indigo-700/50">
                       Jenis: {filterType}
                       <button onClick={() => setFilterType("Semua")} className="hover:text-white cursor-pointer">✕</button>
                     </span>
                   )}
                   {filterMonth !== "Semua" && (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-900/40 text-amber-300 border border-amber-700/50">
+                    <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold bg-amber-900/40 text-amber-300 border border-amber-700/50">
                       Bulan: {filterMonth}
                       <button onClick={() => setFilterMonth("Semua")} className="hover:text-white cursor-pointer">✕</button>
                     </span>
                   )}
                   {sortBy !== "Terbaru" && (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-900/40 text-purple-300 border border-purple-700/50">
+                    <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold bg-purple-900/40 text-purple-300 border border-purple-700/50">
                       Urutan: {sortBy}
                       <button onClick={() => setSortBy("Terbaru")} className="hover:text-white cursor-pointer">✕</button>
                     </span>
                   )}
                   <button 
                     onClick={resetFilters}
-                    className="text-xs text-red-400 hover:text-red-300 underline ml-auto font-medium cursor-pointer"
+                    className="text-xs sm:text-sm text-rose-400 hover:text-rose-300 font-semibold underline ml-auto cursor-pointer"
                   >
                     Reset Semua Filter
                   </button>
@@ -1366,14 +1405,14 @@ export default function Home() {
               )}
             </div>
             <div className="overflow-x-auto min-h-[300px]">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-800/50 text-slate-400">
+              <table className="w-full text-left text-sm sm:text-base">
+                <thead className="bg-slate-800/60 text-slate-300">
                   <tr>
-                    <th className="p-4 font-medium">Tanggal Dibuat</th>
-                    <th className="p-4 font-medium">Nama Klien</th>
-                    <th className="p-4 font-medium">Jenis Jaminan</th>
-                    <th className="p-4 font-medium">Nilai Proyek</th>
-                    <th className="p-4 font-medium text-right">Aksi</th>
+                    <th className="py-4.5 px-5 font-semibold text-xs sm:text-sm uppercase tracking-wider">Tanggal Dibuat</th>
+                    <th className="py-4.5 px-5 font-semibold text-xs sm:text-sm uppercase tracking-wider">Nama Klien</th>
+                    <th className="py-4.5 px-5 font-semibold text-xs sm:text-sm uppercase tracking-wider">Jenis Jaminan</th>
+                    <th className="py-4.5 px-5 font-semibold text-xs sm:text-sm uppercase tracking-wider">Nilai Proyek</th>
+                    <th className="py-4.5 px-5 font-semibold text-xs sm:text-sm uppercase tracking-wider text-right">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/50">
@@ -1399,9 +1438,9 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={fetchDocuments}
-                            className="mt-2 px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-slate-700 transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+                            className="mt-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-slate-700 transition-all cursor-pointer flex items-center gap-2 shadow-sm"
                           >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                             <span>Muat Ulang Data Server</span>
                           </button>
                         </div>
@@ -1409,13 +1448,13 @@ export default function Home() {
                     </tr>
                   ) : (
                     filteredDocuments.map((doc: any) => (
-                      <tr key={doc.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="p-4 text-slate-300">
-                          <div className="font-semibold text-slate-200 whitespace-nowrap">
+                      <tr key={doc.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-4.5 px-5 text-slate-300">
+                          <div className="font-semibold text-slate-100 text-sm sm:text-base whitespace-nowrap">
                             {doc.created_at ? doc.created_at.substring(0, 10) : "-"}
                           </div>
                           {doc.created_at && (
-                            <div className="text-[11px] text-slate-400 font-mono mt-0.5 whitespace-nowrap">
+                            <div className="text-xs text-slate-400 font-mono mt-0.5 whitespace-nowrap">
                               {doc.created_at.includes("T")
                                 ? doc.created_at.substring(11, 16) + " WIB"
                                 : doc.created_at.includes(" ")
@@ -1424,9 +1463,9 @@ export default function Home() {
                             </div>
                           )}
                         </td>
-                        <td className="p-4 font-medium text-white">
-                          <div className="flex items-center gap-2.5 flex-wrap">
-                            <span>{doc.nama_klien}</span>
+                        <td className="py-4.5 px-5 font-medium text-white">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <span className="text-sm sm:text-base font-semibold text-white">{doc.nama_klien}</span>
                             {(() => {
                               const docOverrides = getDocOverrides(doc);
                               const rowVal = evaluateCrossValidation(doc, docOverrides);
@@ -1435,7 +1474,7 @@ export default function Home() {
                               const hasResolved = rowVal.checks.some((c: any) => c.isResolved);
 
                               return (
-                                <div className="inline-flex items-center gap-1.5 shrink-0 flex-wrap">
+                                <div className="inline-flex items-center gap-2 shrink-0 flex-wrap">
                                   <button 
                                     type="button"
                                     onClick={(e) => {
@@ -1443,17 +1482,17 @@ export default function Home() {
                                       setSelectedAuditDoc(doc);
                                     }}
                                     title="Klik untuk membuka jendela Catatan Audit"
-                                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border shrink-0 cursor-pointer transition-all hover:scale-105 ${
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold border shrink-0 cursor-pointer transition-all hover:scale-105 shadow-sm ${
                                       isG 
                                         ? hasResolved
-                                          ? "bg-sky-500/10 text-sky-400 border-sky-500/30 hover:bg-sky-500/20"
-                                          : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20" 
+                                          ? "bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25"
+                                          : "bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25" 
                                         : isY
-                                        ? "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
-                                        : "bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20"
+                                        ? "bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25"
+                                        : "bg-rose-500/15 text-rose-300 border-rose-500/40 hover:bg-rose-500/25"
                                     }`}
                                   >
-                                    <span className={`w-1.5 h-1.5 rounded-full ${
+                                    <span className={`w-2 h-2 rounded-full ${
                                       isG ? (hasResolved ? "bg-sky-400" : "bg-emerald-400") : isY ? "bg-amber-400" : "bg-rose-400"
                                     }`} />
                                     {isG ? (hasResolved ? "Disetujui Manual" : "Terverifikasi") : isY ? "Tinjau" : "Periksa"}
@@ -1466,9 +1505,9 @@ export default function Home() {
                                       setSelectedAuditDoc(doc);
                                     }}
                                     title="Buka rincian catatan audit & opsi tindakan"
-                                    className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                                    className="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                                   >
-                                    <svg className="w-3 h-3 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                    <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                     <span>Catatan</span>
                                   </button>
 
@@ -1476,10 +1515,10 @@ export default function Home() {
                                     <button
                                       type="button"
                                       onClick={(e) => copyAuditNoteToClipboard(doc, e)}
-                                      title="Salin catatan audit untuk dikirim ke WhatsApp/Email"
-                                      className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                                      title="Salin catatan audit"
+                                      className="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                                     >
-                                      <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                      <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
                                       <span>Salin</span>
                                     </button>
                                   )}
@@ -1488,8 +1527,8 @@ export default function Home() {
                             })()}
                           </div>
                         </td>
-                        <td className="p-4">
-                          <span className={`px-3 py-1 rounded-full text-xs border whitespace-nowrap inline-block ${
+                        <td className="py-4.5 px-5">
+                          <span className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium border whitespace-nowrap inline-block ${
                             (() => {
                               const j = (doc.jenis_dokumen || "").toLowerCase();
                               if (j.includes("pelaksanaan")) return "bg-emerald-900/30 text-emerald-400 border-emerald-500/20";
@@ -1502,8 +1541,8 @@ export default function Home() {
                             {doc.jenis_dokumen}
                           </span>
                         </td>
-                        <td className="p-4 text-slate-300">{doc.nilai_proyek}</td>
-                        <td className="p-4 text-right flex justify-end gap-2">
+                        <td className="py-4.5 px-5 text-slate-200 text-sm sm:text-base font-semibold whitespace-nowrap">{doc.nilai_proyek}</td>
+                        <td className="py-4.5 px-5 text-right flex justify-end gap-2.5 items-center">
                           <button 
                             onClick={() => {
                               setExtractedData({
@@ -1524,13 +1563,13 @@ export default function Home() {
                               });
                               setActiveTab("upload");
                             }}
-                            className="bg-sky-900/50 hover:bg-sky-500 text-sky-300 hover:text-white px-4 py-1.5 rounded-full text-xs cursor-pointer transition-colors border border-sky-500/30"
+                            className="bg-sky-600 hover:bg-sky-500 text-white px-5 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer transition-all shadow-md shadow-sky-600/20 border border-sky-400/40"
                           >
                             Buka
                           </button>
                           <button 
                             onClick={() => setDeleteModalData(doc)}
-                            className="bg-red-900/30 hover:bg-red-600 text-red-400 hover:text-white px-4 py-1.5 rounded-full text-xs cursor-pointer transition-colors border border-red-500/30"
+                            className="bg-red-950/60 hover:bg-red-700 text-red-300 hover:text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold cursor-pointer transition-all border border-red-700/50 hover:border-red-500 shadow-sm"
                           >
                             Hapus
                           </button>
@@ -1773,20 +1812,20 @@ export default function Home() {
                               <button
                                 type="button"
                                 onClick={() => copyAuditNoteToClipboard(extractedData)}
-                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-700/60 hover:border-emerald-500 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-                                title="Salin ringkasan audit untuk dikirim ke WhatsApp/Email"
+                                className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 hover:border-emerald-500 transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+                                title="Salin ringkasan audit"
                               >
-                                <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                                <span>Salin WA</span>
+                                <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                <span>Salin Ringkasan</span>
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => setSelectedAuditDoc(extractedData)}
-                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                                className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-2 shadow-sm"
                                 title="Buka jendela catatan lengkap & riwayat audit"
                               >
-                                <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                <svg className="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                 <span>Detail</span>
                               </button>
                             </div>
@@ -2639,7 +2678,7 @@ export default function Home() {
             ? nonGreen.map((c: any) => `• ${c.label}: ${c.message}`).join("\n")
             : "• Seluruh parameter audit terverifikasi cocok dan valid.";
           
-          const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${selectedAuditDoc.nama_klien || "-"}\nNo. Polis: ${selectedAuditDoc.nomor_identitas || "-"}\nStatus: ${isG ? (hasResolved ? "Terverifikasi Valid (Disetujui Manual)" : "Terverifikasi Valid") : isY ? "Perlu Tinjauan Ringan" : "Perhatian Khusus (Ada Selisih)"} (Akurasi: ${modalVal.score}%)\n\nRincian Temuan:\n${catatans}\n\nMohon konfirmasi ke pihak penjamin/klien.`;
+          const noteText = `[CATATAN AUDIT POLIS]\nKlien: ${selectedAuditDoc.nama_klien || "-"}\nNo. Polis: ${selectedAuditDoc.nomor_identitas || "-"}\nStatus: ${isG ? (hasResolved ? "Terverifikasi Valid (Disetujui Manual)" : "Terverifikasi Valid") : isY ? "Perlu Tinjauan Ringan" : "Perhatian Khusus (Ada Selisih)"} (Akurasi: ${modalVal.score}%)\n\nRincian Temuan:\n${catatans}`;
           
           navigator.clipboard.writeText(noteText);
           toast.success("Catatan audit disalin ke clipboard!");
@@ -2820,13 +2859,13 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleCopyModalNote}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+                  className="px-5 py-2.5 rounded-xl text-sm font-bold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 hover:border-slate-600 transition-all cursor-pointer flex items-center gap-2 shadow-sm"
                 >
                   <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                  <span>Salin Ringkasan (WhatsApp)</span>
+                  <span>Salin Ringkasan</span>
                 </button>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5">
                   {activeTab !== "upload" && (
                     <button
                       type="button"
@@ -2856,7 +2895,7 @@ export default function Home() {
                         }
                         toast.info(`Membuka editor & naskah OCR: ${selectedAuditDoc.nama_klien || selectedAuditDoc.principal || "-"}`);
                       }}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition-all cursor-pointer shadow-lg shadow-sky-600/25 flex items-center gap-1.5"
+                      className="px-5 py-2.5 rounded-xl text-sm font-bold bg-sky-600 hover:bg-sky-500 text-white transition-all cursor-pointer shadow-lg shadow-sky-600/25 flex items-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                       <span>Buka Editor & OCR</span>
@@ -2865,7 +2904,7 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => setSelectedAuditDoc(null)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+                    className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700 transition-all cursor-pointer"
                   >
                     Tutup
                   </button>
