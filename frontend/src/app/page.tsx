@@ -1164,7 +1164,7 @@ export default function Home() {
             </h1>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-              🧪 Testing Lab (Tab: TESTING)
+              Testing Lab (Tab: TESTING)
             </span>
           </div>
           <p className="text-slate-400 mt-2 text-sm sm:text-base">Laboratorium Uji Coba Dokumen Asuransi (Data Terisolasi)</p>
@@ -1300,9 +1300,9 @@ export default function Home() {
                     className="w-full glass-input rounded-xl px-4 py-3 text-sm sm:text-base font-semibold bg-slate-900 border border-slate-700/90 focus:border-sky-400 cursor-pointer text-slate-200 shadow-inner"
                   >
                     <option value="Semua" className="bg-slate-900 text-slate-200">Semua Status</option>
-                    <option value="Terverifikasi" className="bg-slate-900 text-emerald-400 font-bold">🟢 Terverifikasi</option>
-                    <option value="Tinjau" className="bg-slate-900 text-amber-400 font-bold">🟡 Perlu Tinjau</option>
-                    <option value="Perhatian" className="bg-slate-900 text-rose-400 font-bold">🔴 Perhatian Khusus</option>
+                    <option value="Terverifikasi" className="bg-slate-900 text-emerald-400">Terverifikasi</option>
+                    <option value="Tinjau" className="bg-slate-900 text-amber-400">Perlu Tinjau</option>
+                    <option value="Perhatian" className="bg-slate-900 text-rose-400">Perhatian Khusus</option>
                   </select>
                 </div>
 
