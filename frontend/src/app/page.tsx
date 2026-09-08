@@ -305,20 +305,33 @@ export default function Home() {
 
 
   // Fetch Documents
-  const fetchDocuments = async () => {
+  const fetchDocuments = async (isManual = false) => {
     setIsLoadingDocs(true);
     try {
       const res = await fetch(`${API_URL}/api/documents?env=${APP_ENV}`);
       const data = await res.json();
       if (Array.isArray(data)) {
         setDocuments(data);
+        if (isManual) {
+          if (data.length === 0) {
+            toast.info("Data berhasil disegarkan: Belum ada dokumen di database produksi.");
+          } else {
+            toast.success(`Data berhasil disegarkan: ${data.length} dokumen termuat.`);
+          }
+        }
       } else {
         console.error("Backend error or non-array returned:", data);
         setDocuments([]);
+        if (isManual) {
+          toast.error("Gagal menyegarkan data: Format data server tidak sesuai.");
+        }
       }
     } catch (err) {
       console.error("Fetch error:", err);
       setDocuments([]);
+      if (isManual) {
+        toast.error("Gagal menyegarkan data: Periksa koneksi server.");
+      }
     } finally {
       setIsLoadingDocs(false);
     }
@@ -508,7 +521,7 @@ export default function Home() {
     await fetchDocuments();
 
     if (successCount > 0 && errorCount === 0) {
-      toast.success(`Semua ${successCount} dokumen batch berhasil diproses & disinkronkan ke Google Sheets! 🎉`);
+      toast.success(`Semua ${successCount} dokumen batch berhasil diproses & disinkronkan ke Google Sheets!`);
     } else if (successCount > 0 && errorCount > 0) {
       toast.warning(`${successCount} dokumen berhasil, ${errorCount} dokumen gagal. Silakan klik "Coba Lagi" pada file yang gagal.`);
     } else if (successCount === 0 && errorCount > 0) {
@@ -589,7 +602,7 @@ export default function Home() {
           prev.map((f) => (f.id === id ? { ...f, status: "done", data: extracted } : f))
         );
         await fetchDocuments();
-        toast.success(`Dokumen ${targetItem.file.name} berhasil diproses ulang & disinkronkan! 🎉`);
+        toast.success(`Dokumen ${targetItem.file.name} berhasil diproses ulang & disinkronkan!`);
       } else {
         throw new Error(result.detail || "Gagal diproses");
       }
@@ -1249,7 +1262,7 @@ export default function Home() {
                 <div className="flex items-center gap-2.5 self-stretch sm:self-auto">
                   <button
                     type="button"
-                    onClick={fetchDocuments}
+                    onClick={() => fetchDocuments(true)}
                     disabled={isLoadingDocs}
                     className="bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-5 py-3 rounded-xl text-xs sm:text-sm font-bold transition-all border border-slate-700 hover:border-slate-600 cursor-pointer flex items-center gap-2 justify-center disabled:opacity-50 shadow-sm"
                     title="Segarkan data dokumen dari server"
@@ -1435,19 +1448,36 @@ export default function Home() {
                         </div>
                       </td>
                     </tr>
+                  ) : documents.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-10 text-center text-slate-400">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <p className="text-sm text-slate-300 font-medium">Belum ada data dokumen di server produksi.</p>
+                          <p className="text-xs text-slate-500">Dokumen baru yang diekstrak dan disimpan akan otomatis tercatat di sini.</p>
+                          <button
+                            type="button"
+                            onClick={() => fetchDocuments(true)}
+                            disabled={isLoadingDocs}
+                            className="mt-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-slate-700 transition-all cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-50"
+                          >
+                            <svg className={`w-4 h-4 text-sky-400 ${isLoadingDocs ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            <span>{isLoadingDocs ? "Menghubungkan..." : "Segarkan Data Server"}</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   ) : filteredDocuments.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="p-10 text-center text-slate-400">
                         <div className="flex flex-col items-center justify-center gap-2">
-                          <p className="text-sm text-slate-300 font-medium">Pencarian tidak menemukan hasil.</p>
-                          <p className="text-xs text-slate-500">Coba ubah kata kunci filter atau segarkan data dari server.</p>
+                          <p className="text-sm text-slate-300 font-medium">Pencarian atau filter tidak menemukan hasil.</p>
+                          <p className="text-xs text-slate-500">Coba ubah kata kunci pencarian atau reset filter yang aktif.</p>
                           <button
                             type="button"
-                            onClick={fetchDocuments}
+                            onClick={resetFilters}
                             className="mt-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 border border-slate-700 transition-all cursor-pointer flex items-center gap-2 shadow-sm"
                           >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                            <span>Muat Ulang Data Server</span>
+                            <span>Reset Filter</span>
                           </button>
                         </div>
                       </td>
@@ -1761,7 +1791,7 @@ export default function Home() {
                       </div>
                     </div>
                     
-                    {/* 🛡️ 4 Kartu Parameter Validasi Silang (Bersih, Rapi, Langsung Interaktif) */}
+                    {/* 4 Kartu Parameter Validasi Silang (Bersih, Rapi, Langsung Interaktif) */}
                     {(() => {
                       const docOverrides = getDocOverrides(extractedData);
                       const valResult = evaluateCrossValidation(extractedData, docOverrides);
