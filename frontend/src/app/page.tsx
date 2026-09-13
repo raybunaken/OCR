@@ -1712,14 +1712,29 @@ export default function Home() {
                     </label>
                     
                     {file && (
-                      <div className="mt-3">
+                      <div className="mt-3 space-y-2">
                         <button 
                           onClick={handleUpload} 
                           disabled={isUploading}
-                          className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-2.5 rounded-full text-xs font-bold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50 cursor-pointer"
+                          className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-2.5 rounded-full text-xs font-bold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                         >
-                          {isUploading ? "Memproses AI..." : "Ekstrak Sekarang"}
+                          {isUploading ? (
+                            <>
+                              <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              <span>Mengekstrak Dokumen...</span>
+                            </>
+                          ) : (
+                            <span>Ekstrak Sekarang</span>
+                          )}
                         </button>
+                        {isUploading && (
+                          <p className="text-[11px] text-sky-400 font-medium animate-pulse">
+                            Sedang memproses OCR Vision & ekstraksi parameter asuransi, mohon tunggu beberapa detik...
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>

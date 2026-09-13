@@ -600,7 +600,7 @@ async def extract_document(file: UploadFile = File(...)):
                 data_ekstrak = rapikan_teks(teks_digital)
                 return {"status": "success", "data": data_ekstrak}
             else:
-                # PDF Scan (berisi gambar scan) - proses multi-halaman hingga 3 halaman
+                # PDF Scan (berisi gambar scan)
                 combined_ocr_text = ""
                 total_pages = min(len(doc), 3)
                 for page_idx in range(total_pages):
@@ -612,10 +612,21 @@ async def extract_document(file: UploadFile = File(...)):
                         page_text = ocr_from_image_bytes(img_bytes)
                         if page_text:
                             combined_ocr_text += f"\n--- Halaman {page_idx + 1} ---\n" + page_text
+                            
+                            # Optimasi Kecepatan Cerdas:
+                            # Jika Halaman 1 adalah formulir/sertifikat jaminan yang sudah memuat
+                            # parameter pokok asuransi secara lengkap (panjang > 600 karakter & ada kata kunci pokok),
+                            # tidak perlu memproses halaman syarat/lampiran tambahan agar waktu respons cepat (~7-15s).
+                            has_core_bond_data = any(k in page_text.lower() for k in [
+                                "nilai jaminan", "permohonan surety", "sertifikat jaminan", 
+                                "bank garansi", "pemohon jaminan", "penerima jaminan", "jangka waktu jaminan"
+                            ])
+                            if page_idx == 0 and len(page_text.strip()) > 600 and has_core_bond_data:
+                                break
                     except Exception as ocr_err:
                         print(f"Error OCR Halaman {page_idx + 1}:", ocr_err)
                     
-                    # Jeda singkat antar halaman agar aman dari rate limit
+                    # Jeda singkat jika berlanjut ke halaman berikutnya
                     if page_idx < total_pages - 1:
                         time.sleep(0.8)
                 
