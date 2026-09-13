@@ -28,6 +28,13 @@ _env_path = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(_env_path):
     load_dotenv(_env_path)
 
+# Zona Waktu Indonesia Barat (WIB / UTC+7)
+WIB = datetime.timezone(datetime.timedelta(hours=7))
+
+def get_wib_now():
+    """Mengembalikan objek datetime saat ini dalam Waktu Indonesia Barat (WIB / UTC+7)."""
+    return datetime.datetime.now(WIB)
+
 GROQ_API_KEYS = [k.strip() for k in os.getenv("GROQ_API_KEY", "").split(",") if k.strip()]
 groq_clients = [Groq(api_key=k) for k in GROQ_API_KEYS]
 
@@ -582,7 +589,7 @@ def extract_from_image_vision(image_bytes):
 @app.get("/")
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "OCR & Surety API", "timestamp": datetime.datetime.now().isoformat()}
+    return {"status": "ok", "service": "OCR & Surety API", "timestamp": get_wib_now().isoformat()}
 
 @app.post("/api/extract")
 async def extract_document(file: UploadFile = File(...)):
@@ -664,7 +671,7 @@ def get_documents(env: Optional[str] = "production"):
 
 @app.post("/api/documents")
 def save_document(doc: DocumentUpdate):
-    waktu_sekarang = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    waktu_sekarang = get_wib_now().strftime("%Y-%m-%d %H:%M:%S")
     doc_env = doc.env or "production"
     with get_db_cursor(commit=True) as cursor:
         cursor.execute("""
@@ -684,7 +691,7 @@ def save_document(doc: DocumentUpdate):
         ))
         new_doc_id = cursor.fetchone()[0]
 
-    # Trigger Live Sync to Google Sheets
+    # Trigger Live Sync to Google Sheets (Waktu Indonesia Barat / WIB)
     sheets_payload = {
         "action": "INSERT",
         "env": doc_env,
@@ -703,7 +710,7 @@ def save_document(doc: DocumentUpdate):
         "tgl_awal": doc.tgl_awal or "-",
         "tgl_akhir": doc.tgl_akhir or "-",
         "durasi_hk": doc.durasi_hk or "-",
-        "waktu_input": datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        "waktu_input": get_wib_now().strftime("%d/%m/%Y %H:%M:%S")
     }
     sync_to_google_sheets(sheets_payload)
 
@@ -744,7 +751,7 @@ def delete_document(doc_id: int):
 
 @app.put("/api/documents/{doc_id}")
 def update_document(doc_id: int, doc: DocumentUpdate):
-    waktu_sekarang = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    waktu_sekarang = get_wib_now().strftime("%Y-%m-%d %H:%M:%S")
     
     with get_db_cursor(commit=True, dict_cursor=True) as cursor:
         # 1. Ambil data lama
@@ -822,7 +829,7 @@ def update_document(doc_id: int, doc: DocumentUpdate):
         "tgl_awal": doc.tgl_awal or "-",
         "tgl_akhir": doc.tgl_akhir or "-",
         "durasi_hk": doc.durasi_hk or "-",
-        "waktu_input": datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        "waktu_input": get_wib_now().strftime("%d/%m/%Y %H:%M:%S")
     }
     sync_to_google_sheets(sheets_update_payload)
 
@@ -923,7 +930,7 @@ def export_documents_excel():
     wb.save(buffer)
     buffer.seek(0)
 
-    filename = f"Register_Surety_Bond_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"Register_Surety_Bond_{get_wib_now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return Response(
         content=buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
