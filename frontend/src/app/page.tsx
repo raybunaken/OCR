@@ -18,6 +18,9 @@ export default function Home() {
   const [uploadMode, setUploadMode] = useState<"single" | "batch">("single");
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadTimer, setUploadTimer] = useState(0);
+  const [lastProcessDuration, setLastProcessDuration] = useState<number | null>(null);
+  const uploadIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [extractedData, setExtractedData] = useState<any>(null);
   const [batchFiles, setBatchFiles] = useState<BatchFileItem[]>([]);
@@ -352,6 +355,15 @@ export default function Home() {
   const handleUpload = async () => {
     if (!file) return;
     setIsUploading(true);
+    setUploadTimer(0);
+    setLastProcessDuration(null);
+    const startTimestamp = Date.now();
+
+    if (uploadIntervalRef.current) clearInterval(uploadIntervalRef.current);
+    uploadIntervalRef.current = setInterval(() => {
+      setUploadTimer((prev) => prev + 1);
+    }, 1000);
+
     const formData = new FormData();
     formData.append("file", file);
 
@@ -361,12 +373,15 @@ export default function Home() {
         body: formData,
       });
       const result = await res.json();
+      const elapsedSecs = Math.max(1, Math.round((Date.now() - startTimestamp) / 1000));
+      setLastProcessDuration(elapsedSecs);
+
       if (res.ok && result.status === "success" && result.data) {
         if (result.data.error || result.data.teks_asli?.startsWith("Pengekstrakan gagal")) {
           toast.error(`Gagal mengekstrak dokumen: ${result.data.teks_asli}`);
         } else {
           setExtractedData(result.data); // data hasil extract belum ada ID
-          toast.success("Dokumen berhasil diproses oleh AI!");
+          toast.success(`Dokumen berhasil diproses oleh AI dalam ${elapsedSecs} detik!`);
         }
       } else {
         toast.error(`Gagal: ${result.detail || "Tidak dapat memproses dokumen."}`);
@@ -374,6 +389,10 @@ export default function Home() {
     } catch (err: any) {
       toast.error(`Terjadi kesalahan jaringan: ${err.message}`);
     } finally {
+      if (uploadIntervalRef.current) {
+        clearInterval(uploadIntervalRef.current);
+        uploadIntervalRef.current = null;
+      }
       setIsUploading(false);
     }
   };
@@ -1712,27 +1731,86 @@ export default function Home() {
                     </label>
                     
                     {file && (
-                      <div className="mt-3 space-y-2">
+                      <div className="mt-4 space-y-3 max-w-md mx-auto text-left">
+                        {/* Info File & Estimasi Waktu */}
+                        <div className="flex items-center justify-between bg-slate-800/80 border border-slate-700/80 px-4 py-2.5 rounded-2xl text-xs shadow-sm">
+                          <div className="flex items-center gap-2 truncate pr-2">
+                            <svg className="w-4 h-4 text-sky-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            <span className="text-slate-200 font-medium truncate" title={file.name}>{file.name}</span>
+                          </div>
+                          <span className="text-sky-400 font-semibold bg-sky-950/80 border border-sky-800/60 px-2.5 py-1 rounded-full text-[11px] shrink-0 whitespace-nowrap">
+                            {file.name.toLowerCase().endsWith(".pdf") ? "Estimasi: ~15-25 detik" : "Estimasi: ~10-15 detik"}
+                          </span>
+                        </div>
+
+                        {/* Tombol Ekstrak */}
                         <button 
                           onClick={handleUpload} 
                           disabled={isUploading}
-                          className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-2.5 rounded-full text-xs font-bold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                          className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-3 rounded-2xl text-xs font-bold shadow-lg shadow-sky-500/25 transition-all w-full disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                         >
                           {isUploading ? (
                             <>
-                              <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                              <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                               </svg>
-                              <span>Mengekstrak Dokumen...</span>
+                              <span>Sedang Mengekstrak ({uploadTimer} detik)...</span>
                             </>
                           ) : (
                             <span>Ekstrak Sekarang</span>
                           )}
                         </button>
-                        {isUploading && (
-                          <p className="text-[11px] text-sky-400 font-medium animate-pulse">
-                            Sedang memproses OCR Vision & ekstraksi parameter asuransi, mohon tunggu beberapa detik...
+
+                        {/* Kartu Estimasi Waktu & Progress Bar Dinamis */}
+                        {isUploading && (() => {
+                          const isPdf = file.name.toLowerCase().endsWith(".pdf");
+                          const targetSecs = isPdf ? 22 : 12;
+                          const progressPct = Math.min(95, Math.max(8, Math.round((uploadTimer / targetSecs) * 90)));
+                          const currentStep = uploadTimer < 3 
+                            ? "Tahap 1/3: Mengunggah dokumen..." 
+                            : uploadTimer < 14 
+                            ? "Tahap 2/3: Analisis teks visual OCR..." 
+                            : "Tahap 3/3: Menyusun parameter jaminan...";
+
+                          return (
+                            <div className="p-4 rounded-2xl bg-slate-900/95 border border-sky-500/30 space-y-2.5 shadow-xl animate-in fade-in duration-300">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-sky-400 font-bold flex items-center gap-2">
+                                  <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+                                  </span>
+                                  {currentStep}
+                                </span>
+                                <span className="text-slate-300 font-mono text-[11px] bg-slate-800 px-2.5 py-0.5 rounded-md border border-slate-700">
+                                  {uploadTimer}s / est. ~{targetSecs}s
+                                </span>
+                              </div>
+
+                              <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-700/60">
+                                <div 
+                                  className="bg-gradient-to-r from-sky-500 via-blue-500 to-emerald-500 h-2 rounded-full transition-all duration-500"
+                                  style={{ width: `${progressPct}%` }}
+                                ></div>
+                              </div>
+
+                              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                <span>
+                                  {uploadTimer < 15 
+                                    ? "Model Vision AI sedang membaca teks dokumen..." 
+                                    : "Menyusun Principal, Nilai, Nomor & Durasi..."}
+                                </span>
+                                <span className="text-sky-300 font-semibold">{progressPct}%</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Status Terakhir */}
+                        {!isUploading && lastProcessDuration !== null && extractedData && (
+                          <p className="text-[11px] text-emerald-400 text-center font-medium">
+                            Dokumen berhasil diekstrak dalam {lastProcessDuration} detik.
                           </p>
                         )}
                       </div>
@@ -2350,6 +2428,16 @@ export default function Home() {
                           <span className="text-red-400 font-semibold flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
                             {batchFiles.filter(f => f.status === "error").length} Gagal
+                          </span>
+                        )}
+                        {batchFiles.some(f => f.status !== "done") && (
+                          <span className="text-sky-400 font-semibold bg-sky-950/60 border border-sky-800/40 px-2.5 py-0.5 rounded-full text-[11px] flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span>
+                              Estimasi Antrian: ~{Math.ceil((batchFiles.filter(f => f.status !== "done").length * 18) / 60) > 1 
+                                ? `${Math.ceil((batchFiles.filter(f => f.status !== "done").length * 18) / 60)} menit` 
+                                : `${batchFiles.filter(f => f.status !== "done").length * 18} detik`}
+                            </span>
                           </span>
                         )}
                       </div>
