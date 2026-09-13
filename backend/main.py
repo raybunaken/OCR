@@ -337,7 +337,18 @@ def parse_dates_from_text(text_to_search):
             
     return found_dates
 
+def clean_repetition_loops(text: str) -> str:
+    """Membersihkan pengulangan frasa atau kata berantai (de-duplication) akibat halusinasi / looping OCR."""
+    if not text:
+        return ""
+    # 1. Bersihkan pengulangan pola bergaris miring / slash berantai (misal: / lelang / tender / proyek / ...)
+    cleaned = re.sub(r'((?:\s*[\/]\s*[A-Za-z0-9_\(\)]+){2,8})(?:\s*[\/]?\s*\1){2,}', r'\1', text, flags=re.IGNORECASE)
+    # 2. Bersihkan pengulangan frasa umum yang berulang berturut-turut >= 3 kali
+    cleaned = re.sub(r'(\b[A-Za-z0-9_\s\/\.-]{6,60}?\b)(?:\s*[\/,;.-]?\s*\1){2,}', r'\1', cleaned, flags=re.IGNORECASE)
+    return cleaned
+
 def rapikan_teks(teks_mentah):
+    teks_mentah = clean_repetition_loops(teks_mentah)
     fallback_data = {
         "kode_jenis": "PB", "jenis_jaminan": "-", "nomor_jaminan": "-", "nilai_jaminan": "-", 
         "principal": "-", "obligee": "-", "pekerjaan": "-", 
@@ -488,6 +499,9 @@ def rapikan_teks(teks_mentah):
                     result_data["nomor_jaminan"] = val
                     break
 
+    if result_data.get("teks_asli"):
+        result_data["teks_asli"] = clean_repetition_loops(result_data["teks_asli"])
+
     return result_data
 
 
@@ -496,11 +510,11 @@ def ocr_from_image_bytes(image_bytes):
     b64_image = encode_image_bytes(image_bytes)
     ocr_prompt = (
         "Kamu adalah mesin OCR presisi tinggi. DILARANG membuat pembukaan, penjelasan, atau tag <think>. "
-        "Langsung transkripsikan seluruh teks dokumen dari paling atas hingga tanda tangan paling bawah secara utuh dan persis."
+        "Langsung transkripsikan seluruh teks dokumen dari paling atas hingga tanda tangan paling bawah secara utuh dan persis. "
+        "DILARANG berhalusinasi dan DILARANG mengulang kata atau frasa yang sama secara berantai/loop."
     )
     
-    # Gunakan qwen/qwen3.8-27b (direct OCR tanpa think tag, lengkap dan cepat)
-    # Gunakan max_tokens=900 agar berada aman di bawah batas 1000 OTPM Groq
+    # Gunakan qwen/qwen3.8-27b dengan temperature 0.1 dan presence_penalty 0.4 agar tidak terjebak degenerate repetition
     chat = call_groq_api(
         messages=[
             {
@@ -512,8 +526,9 @@ def ocr_from_image_bytes(image_bytes):
             }
         ],
         model="qwen/qwen3.8-27b",
-        temperature=0.0,
-        max_tokens=900
+        temperature=0.1,
+        presence_penalty=0.4,
+        max_tokens=950
     )
     raw_content = chat.choices[0].message.content or ""
     
@@ -532,7 +547,7 @@ def ocr_from_image_bytes(image_bytes):
     else:
         clean_text = raw_content.strip()
         
-    return clean_text
+    return clean_repetition_loops(clean_text)
 
 
 def extract_from_image_vision(image_bytes):
@@ -585,8 +600,7 @@ async def extract_document(file: UploadFile = File(...)):
                 data_ekstrak = rapikan_teks(teks_digital)
                 return {"status": "success", "data": data_ekstrak}
             else:
-                # PDF Scan (berisi gambar scan)
-                # Ambil Halaman 1 terlebih dahulu (karena halaman 1 adalah Sertifikat / Formulir Permohonan utama)
+                # PDF Scan (berisi gambar scan) - proses multi-halaman hingga 3 halaman
                 combined_ocr_text = ""
                 total_pages = min(len(doc), 3)
                 for page_idx in range(total_pages):
@@ -598,11 +612,12 @@ async def extract_document(file: UploadFile = File(...)):
                         page_text = ocr_from_image_bytes(img_bytes)
                         if page_text:
                             combined_ocr_text += f"\n--- Halaman {page_idx + 1} ---\n" + page_text
-                            # Jika halaman ini sudah memuat teks pokok jaminan (>300 karakter), cukup agar hemat kuota vision
-                            if len(page_text.strip()) > 300:
-                                break
                     except Exception as ocr_err:
                         print(f"Error OCR Halaman {page_idx + 1}:", ocr_err)
+                    
+                    # Jeda singkat antar halaman agar aman dari rate limit
+                    if page_idx < total_pages - 1:
+                        time.sleep(0.8)
                 
                 if combined_ocr_text.strip():
                     data_ekstrak = rapikan_teks(combined_ocr_text)
