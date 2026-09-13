@@ -564,6 +564,11 @@ def extract_from_image_vision(image_bytes):
         return fallback_data
 
 
+@app.get("/")
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "service": "OCR & Surety API", "timestamp": datetime.datetime.now().isoformat()}
+
 @app.post("/api/extract")
 async def extract_document(file: UploadFile = File(...)):
     contents = await file.read()
