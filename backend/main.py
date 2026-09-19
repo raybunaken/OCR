@@ -205,8 +205,14 @@ def init_db():
         print("INIT DB NOTICE:", e)
 
 def generate_clean_pdf_filename(nama_klien: Optional[str], nomor_identitas: Optional[str]) -> str:
-    clean_klien = re.sub(r'[\/\\:\*\?"<>\|\r\n]+', '-', (nama_klien or 'DOKUMEN')).strip()
-    clean_nomor = re.sub(r'[\/\\:\*\?"<>\|\r\n]+', '-', (nomor_identitas or 'TANPA_NOMOR')).strip()
+    clean_klien = re.sub(r'[\/\\:\*\?"<>\|\r\n]+', '-', (nama_klien or '').strip()).strip(" -")
+    clean_nomor = re.sub(r'[\/\\:\*\?"<>\|\r\n]+', '-', (nomor_identitas or '').strip()).strip(" -")
+    
+    if not clean_klien or clean_klien == "-":
+        clean_klien = "DOKUMEN"
+    if not clean_nomor or clean_nomor == "-":
+        clean_nomor = "TANPA_NOMOR"
+        
     clean_klien = clean_klien[:60].strip(" -")
     clean_nomor = clean_nomor[:60].strip(" -")
     return f"{clean_klien} - {clean_nomor}.pdf"
@@ -732,7 +738,10 @@ def save_document(doc: DocumentUpdate):
             if not doc.file_name:
                 doc.file_name = last_uploaded_cache["filename"]
 
-    clean_file_name = doc.file_name or (generate_clean_pdf_filename(doc.nama_klien, doc.nomor_identitas) if doc.file_base64 else None)
+    if doc.file_base64:
+        clean_file_name = generate_clean_pdf_filename(doc.nama_klien, doc.nomor_identitas)
+    else:
+        clean_file_name = None
 
     with get_db_cursor(commit=True) as cursor:
         cursor.execute("""
@@ -874,7 +883,7 @@ def update_document(doc_id: int, doc: DocumentUpdate):
 
     # 5. Sinkronisasi UPDATE ke Google Sheets & Google Drive
     doc_env = doc.env or old_data_dict.get("env") or "production"
-    clean_file_name = doc.file_name or (generate_clean_pdf_filename(doc.nama_klien, doc.nomor_identitas) if doc.file_base64 else None)
+    clean_file_name = generate_clean_pdf_filename(doc.nama_klien, doc.nomor_identitas) if doc.file_base64 else (doc.file_name or old_data_dict.get("file_name"))
     if clean_file_name:
         with get_db_cursor(commit=True) as cur_f:
             cur_f.execute("UPDATE dokumen SET file_name=%s WHERE id=%s", (clean_file_name, doc_id))
