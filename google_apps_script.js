@@ -6,10 +6,13 @@
 
 var FOLDER_ID = "1asIe62GFX6b7SWjaXDcGx--2_l1-dJOg";
 
-// Fungsi untuk cek & aktivasi izin Drive (Cukup klik 'Run'/'Jalankan' sekali di editor)
+// FUNGSI UNTUK AKTIVASI IZIN GOOGLE DRIVE (Klik 'Run'/'Jalankan' untuk beri izin)
 function testDrivePermission() {
   var folder = DriveApp.getFolderById(FOLDER_ID);
-  Logger.log("BERHASIL! Folder Drive terhubung: " + folder.getName());
+  var testBlob = Utilities.newBlob("Tes Izin Akses Drive", "text/plain", "tes_izin.txt");
+  var testFile = folder.createFile(testBlob);
+  Logger.log("BERHASIL! Folder dan Izin Drive Aktif. File tes: " + testFile.getUrl());
+  testFile.setTrashed(true);
 }
 
 function doGet(e) {

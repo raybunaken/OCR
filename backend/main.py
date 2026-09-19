@@ -608,6 +608,20 @@ def extract_from_image_vision(image_bytes):
         return fallback_data
 
 
+# Cache berkas upload untuk auto-attach saat klik Simpan (meski frontend belum ter-refresh)
+cached_uploads = {}
+last_uploaded_cache = {"contents_b64": None, "filename": None, "timestamp": 0}
+
+def remember_upload(data_ekstrak, b64_content, filename):
+    if isinstance(data_ekstrak, dict):
+        nomor = data_ekstrak.get("nomor_jaminan")
+        if nomor and str(nomor).strip() not in ["-", ""]:
+            cached_uploads[str(nomor).strip()] = {
+                "contents_b64": b64_content,
+                "filename": filename,
+                "timestamp": time.time()
+            }
+
 @app.get("/")
 @app.get("/health")
 def health_check():
@@ -616,6 +630,13 @@ def health_check():
 @app.post("/api/extract")
 async def extract_document(file: UploadFile = File(...)):
     contents = await file.read()
+    global last_uploaded_cache
+    b64_content = base64.b64encode(contents).decode('utf-8')
+    last_uploaded_cache = {
+        "contents_b64": b64_content,
+        "filename": file.filename,
+        "timestamp": time.time()
+    }
     
     try:
         if file.filename.lower().endswith('.pdf'):
@@ -627,6 +648,7 @@ async def extract_document(file: UploadFile = File(...)):
             if len(teks_digital.strip()) > 50:
                 # Digital PDF (bisa di-select teksnya) - mencakup seluruh halaman
                 data_ekstrak = rapikan_teks(teks_digital)
+                remember_upload(data_ekstrak, b64_content, file.filename)
                 return {"status": "success", "data": data_ekstrak}
             else:
                 # PDF Scan (berisi gambar scan)
@@ -661,6 +683,7 @@ async def extract_document(file: UploadFile = File(...)):
                 
                 if combined_ocr_text.strip():
                     data_ekstrak = rapikan_teks(combined_ocr_text)
+                    remember_upload(data_ekstrak, b64_content, file.filename)
                     return {"status": "success", "data": data_ekstrak}
                 else:
                     raise HTTPException(status_code=422, detail="Gagal membaca teks dari PDF Scan. Pastikan kualitas gambar scan cukup jelas.")
@@ -670,6 +693,7 @@ async def extract_document(file: UploadFile = File(...)):
             data_ekstrak = extract_from_image_vision(contents)
             if data_ekstrak.get("error"):
                 raise HTTPException(status_code=422, detail=data_ekstrak.get("teks_asli", "Gagal mengekstrak teks dari gambar"))
+            remember_upload(data_ekstrak, b64_content, file.filename)
             return {"status": "success", "data": data_ekstrak}
         else:
             raise HTTPException(status_code=400, detail="Format tidak didukung. Harap upload PDF, JPG, atau PNG.")
@@ -695,6 +719,19 @@ def get_documents(env: Optional[str] = "production"):
 def save_document(doc: DocumentUpdate):
     waktu_sekarang = get_wib_now().strftime("%Y-%m-%d %H:%M:%S")
     doc_env = doc.env or "production"
+
+    # Auto-resolve file_base64 dari cache backend jika frontend lama tidak menyertakannya
+    if not doc.file_base64:
+        if doc.nomor_identitas and str(doc.nomor_identitas).strip() in cached_uploads:
+            cached_item = cached_uploads[str(doc.nomor_identitas).strip()]
+            doc.file_base64 = cached_item["contents_b64"]
+            if not doc.file_name:
+                doc.file_name = cached_item["filename"]
+        elif last_uploaded_cache.get("contents_b64") and (time.time() - last_uploaded_cache.get("timestamp", 0) < 1800):
+            doc.file_base64 = last_uploaded_cache["contents_b64"]
+            if not doc.file_name:
+                doc.file_name = last_uploaded_cache["filename"]
+
     clean_file_name = doc.file_name or (generate_clean_pdf_filename(doc.nama_klien, doc.nomor_identitas) if doc.file_base64 else None)
 
     with get_db_cursor(commit=True) as cursor:
