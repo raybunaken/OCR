@@ -288,6 +288,20 @@ export default function Home() {
     return isNaN(num) ? 0 : num;
   };
 
+  // Helper untuk konversi File browser ke string Base64 murni
+  const fileToBase64 = (fileObj: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(fileObj);
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.includes(",") ? result.split(",")[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
   // States untuk Pencarian Ultimate & Filter
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("Semua");
@@ -487,7 +501,20 @@ export default function Home() {
             throw new Error(errDetail);
           }
           
-          // 2. Auto-Simpan ke Database & Auto-Sync Google Sheets
+          // 2. Auto-Simpan ke Database & Auto-Sync Google Sheets & Google Drive
+          let batchFileBase64: string | undefined = undefined;
+          let batchFileName: string | undefined = undefined;
+          if (batchFiles[i]?.file) {
+            try {
+              batchFileBase64 = await fileToBase64(batchFiles[i].file);
+              const cleanKlien = (extracted.principal || "DOKUMEN").replace(/[/\\:*?"<>|\r\n]+/g, "-").trim().substring(0, 60);
+              const cleanNomor = (extracted.nomor_jaminan || "TANPA_NOMOR").replace(/[/\\:*?"<>|\r\n]+/g, "-").trim().substring(0, 60);
+              batchFileName = `${cleanKlien} - ${cleanNomor}.pdf`;
+            } catch (convErr) {
+              console.error("Gagal membaca file batch ke base64:", convErr);
+            }
+          }
+
           const payload = {
             nama_klien: extracted.principal || "-",
             jenis_dokumen: extracted.jenis_jaminan || "-",
@@ -502,7 +529,9 @@ export default function Home() {
             tgl_awal: extracted.tgl_awal || "-",
             tgl_akhir: extracted.tgl_akhir || "-",
             durasi_hk: String(extracted.durasi_hk || calculateDays(extracted.masa_berlaku) || "-"),
-            env: APP_ENV
+            env: APP_ENV,
+            file_base64: batchFileBase64,
+            file_name: batchFileName
           };
 
           await fetch(`${API_URL}/api/documents`, {
@@ -594,6 +623,19 @@ export default function Home() {
           throw new Error(errDetail);
         }
 
+        let retryFileBase64: string | undefined = undefined;
+        let retryFileName: string | undefined = undefined;
+        if (targetItem.file) {
+          try {
+            retryFileBase64 = await fileToBase64(targetItem.file);
+            const cleanKlien = (extracted.principal || "DOKUMEN").replace(/[/\\:*?"<>|\r\n]+/g, "-").trim().substring(0, 60);
+            const cleanNomor = (extracted.nomor_jaminan || "TANPA_NOMOR").replace(/[/\\:*?"<>|\r\n]+/g, "-").trim().substring(0, 60);
+            retryFileName = `${cleanKlien} - ${cleanNomor}.pdf`;
+          } catch (convErr) {
+            console.error("Gagal membaca retry file ke base64:", convErr);
+          }
+        }
+
         const payload = {
           nama_klien: extracted.principal || "-",
           jenis_dokumen: extracted.jenis_jaminan || "-",
@@ -608,7 +650,9 @@ export default function Home() {
           tgl_awal: extracted.tgl_awal || "-",
           tgl_akhir: extracted.tgl_akhir || "-",
           durasi_hk: String(extracted.durasi_hk || calculateDays(extracted.masa_berlaku) || "-"),
-          env: APP_ENV
+          env: APP_ENV,
+          file_base64: retryFileBase64,
+          file_name: retryFileName
         };
 
         await fetch(`${API_URL}/api/documents`, {
@@ -637,6 +681,19 @@ export default function Home() {
     if (!extractedData || isSaving) return;
     setIsSaving(true);
     
+    let saveFileBase64: string | undefined = undefined;
+    let saveFileName: string | undefined = extractedData.file_name;
+    if (file) {
+      try {
+        saveFileBase64 = await fileToBase64(file);
+        const cleanKlien = (extractedData.principal || "DOKUMEN").replace(/[/\\:*?"<>|\r\n]+/g, "-").trim().substring(0, 60);
+        const cleanNomor = (extractedData.nomor_jaminan || "TANPA_NOMOR").replace(/[/\\:*?"<>|\r\n]+/g, "-").trim().substring(0, 60);
+        saveFileName = `${cleanKlien} - ${cleanNomor}.pdf`;
+      } catch (convErr) {
+        console.error("Gagal membaca file ke base64:", convErr);
+      }
+    }
+
     const payload = {
       nama_klien: extractedData.principal || "-",
       jenis_dokumen: extractedData.jenis_jaminan || "-",
@@ -651,7 +708,10 @@ export default function Home() {
       tgl_awal: extractedData.tgl_awal || "-",
       tgl_akhir: extractedData.tgl_akhir || "-",
       durasi_hk: String(extractedData.durasi_hk || calculateDays(extractedData.masa_berlaku) || "-"),
-      env: APP_ENV
+      env: APP_ENV,
+      file_base64: saveFileBase64,
+      file_name: saveFileName,
+      file_url: extractedData.file_url
     };
 
     try {
@@ -1598,6 +1658,18 @@ export default function Home() {
                         </td>
                         <td className="py-4.5 px-5 text-slate-200 text-sm sm:text-base font-semibold whitespace-nowrap">{doc.nilai_proyek}</td>
                         <td className="py-4.5 px-5 text-right flex justify-end gap-2.5 items-center">
+                          {doc.file_url && (
+                            <a
+                              href={doc.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={`Buka Dokumen PDF Asli di Google Drive (${doc.file_name || "Buka Berkas"})`}
+                              className="bg-emerald-950/70 hover:bg-emerald-700 text-emerald-300 hover:text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all border border-emerald-600/50 hover:border-emerald-400 shadow-sm flex items-center gap-1.5"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                              <span>PDF</span>
+                            </a>
+                          )}
                           <button 
                             onClick={() => {
                               setExtractedData({
@@ -1614,7 +1686,9 @@ export default function Home() {
                                 tgl_awal: doc.tgl_awal || "",
                                 tgl_akhir: doc.tgl_akhir || "",
                                 durasi_hk: doc.durasi_hk || "",
-                                teks_asli: doc.teks_dokumen
+                                teks_asli: doc.teks_dokumen,
+                                file_url: doc.file_url,
+                                file_name: doc.file_name
                               });
                               setActiveTab("upload");
                             }}
@@ -1881,6 +1955,19 @@ export default function Home() {
                             </>
                           )}
                         </button>
+
+                        {extractedData.file_url && (
+                          <a 
+                            href={extractedData.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm cursor-pointer whitespace-nowrap bg-emerald-950/70 hover:bg-emerald-800 text-emerald-300 hover:text-white border-emerald-600/60 hover:border-emerald-400"
+                            title={`Buka Dokumen PDF Asli di Google Drive (${extractedData.file_name || "Buka Berkas"})`}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            <span>Buka PDF ↗</span>
+                          </a>
+                        )}
                       </div>
                     </div>
                     

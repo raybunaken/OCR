@@ -188,6 +188,8 @@ def init_db():
             cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS tgl_akhir TEXT;")
             cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS durasi_hk TEXT;")
             cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS env TEXT DEFAULT 'production';")
+            cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS file_url TEXT;")
+            cursor.execute("ALTER TABLE dokumen ADD COLUMN IF NOT EXISTS file_name TEXT;")
             
             # Buat tabel audit_logs jika belum ada
             cursor.execute("""
@@ -202,14 +204,31 @@ def init_db():
     except Exception as e:
         print("INIT DB NOTICE:", e)
 
-def sync_to_google_sheets(payload):
+def generate_clean_pdf_filename(nama_klien: Optional[str], nomor_identitas: Optional[str]) -> str:
+    clean_klien = re.sub(r'[\/\\:\*\?"<>\|\r\n]+', '-', (nama_klien or 'DOKUMEN')).strip()
+    clean_nomor = re.sub(r'[\/\\:\*\?"<>\|\r\n]+', '-', (nomor_identitas or 'TANPA_NOMOR')).strip()
+    clean_klien = clean_klien[:60].strip(" -")
+    clean_nomor = clean_nomor[:60].strip(" -")
+    return f"{clean_klien} - {clean_nomor}.pdf"
+
+def sync_to_google_sheets(payload, doc_id=None):
     def _worker():
         webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbyqR2iO8lRtSNnJQWWzUXqHAqSpLYF5w2E5I10E-LPsViQpVUBymdEMRzjG_BnIRcqX8g/exec")
         if not webhook_url:
             return
         try:
-            res = requests.post(webhook_url, json=payload, timeout=10)
+            res = requests.post(webhook_url, json=payload, timeout=25)
             print("GOOGLE SHEETS SYNC STATUS:", res.status_code, res.text[:200])
+            if res.status_code == 200:
+                try:
+                    res_json = res.json()
+                    returned_file_url = res_json.get("file_url")
+                    if returned_file_url and doc_id:
+                        with get_db_cursor(commit=True) as cursor:
+                            cursor.execute("UPDATE dokumen SET file_url = %s WHERE id = %s", (returned_file_url, doc_id))
+                        print(f"DATABASE UPDATED: file_url saved for doc_id {doc_id}")
+                except Exception as json_err:
+                    print("NOTICE PARSING SYNC JSON:", json_err)
         except Exception as e:
             print("GOOGLE SHEETS SYNC NOTICE:", e)
 
@@ -255,6 +274,9 @@ class DocumentUpdate(BaseModel):
     tgl_akhir: Optional[str] = ""
     durasi_hk: Optional[str] = ""
     env: Optional[str] = "production"
+    file_base64: Optional[str] = None
+    file_name: Optional[str] = None
+    file_url: Optional[str] = None
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -673,25 +695,27 @@ def get_documents(env: Optional[str] = "production"):
 def save_document(doc: DocumentUpdate):
     waktu_sekarang = get_wib_now().strftime("%Y-%m-%d %H:%M:%S")
     doc_env = doc.env or "production"
+    clean_file_name = doc.file_name or (generate_clean_pdf_filename(doc.nama_klien, doc.nomor_identitas) if doc.file_base64 else None)
+
     with get_db_cursor(commit=True) as cursor:
         cursor.execute("""
             INSERT INTO dokumen (
                 nama_klien, jenis_dokumen, nomor_identitas, nilai_proyek, 
                 obligee, pekerjaan, masa_berlaku, teks_dokumen, 
                 kode_jenis, tgl_terbit, tgl_awal, tgl_akhir, durasi_hk,
-                created_at, updated_at, env
+                created_at, updated_at, env, file_url, file_name
             ) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             doc.nama_klien, doc.jenis_dokumen, doc.nomor_identitas, doc.nilai_proyek, 
             doc.obligee, doc.pekerjaan, doc.masa_berlaku, doc.teks_dokumen, 
             doc.kode_jenis, doc.tgl_terbit, doc.tgl_awal, doc.tgl_akhir, doc.durasi_hk,
-            waktu_sekarang, waktu_sekarang, doc_env
+            waktu_sekarang, waktu_sekarang, doc_env, doc.file_url, clean_file_name
         ))
         new_doc_id = cursor.fetchone()[0]
 
-    # Trigger Live Sync to Google Sheets (Waktu Indonesia Barat / WIB)
+    # Trigger Live Sync to Google Sheets & Google Drive
     sheets_payload = {
         "action": "INSERT",
         "env": doc_env,
@@ -710,11 +734,14 @@ def save_document(doc: DocumentUpdate):
         "tgl_awal": doc.tgl_awal or "-",
         "tgl_akhir": doc.tgl_akhir or "-",
         "durasi_hk": doc.durasi_hk or "-",
-        "waktu_input": get_wib_now().strftime("%d/%m/%Y %H:%M:%S")
+        "waktu_input": get_wib_now().strftime("%d/%m/%Y %H:%M:%S"),
+        "file_base64": doc.file_base64,
+        "file_name": clean_file_name,
+        "file_mime": "application/pdf"
     }
-    sync_to_google_sheets(sheets_payload)
+    sync_to_google_sheets(sheets_payload, doc_id=new_doc_id)
 
-    return {"status": "success", "id": new_doc_id}
+    return {"status": "success", "id": new_doc_id, "file_name": clean_file_name}
 
 @app.delete("/api/documents/{doc_id}")
 def delete_document(doc_id: int):
@@ -808,8 +835,13 @@ def update_document(doc_id: int, doc: DocumentUpdate):
             waktu_sekarang, doc_id
         ))
 
-    # 5. Sinkronisasi UPDATE ke Google Sheets
+    # 5. Sinkronisasi UPDATE ke Google Sheets & Google Drive
     doc_env = doc.env or old_data_dict.get("env") or "production"
+    clean_file_name = doc.file_name or (generate_clean_pdf_filename(doc.nama_klien, doc.nomor_identitas) if doc.file_base64 else None)
+    if clean_file_name:
+        with get_db_cursor(commit=True) as cur_f:
+            cur_f.execute("UPDATE dokumen SET file_name=%s WHERE id=%s", (clean_file_name, doc_id))
+
     sheets_update_payload = {
         "action": "UPDATE",
         "env": doc_env,
@@ -829,9 +861,13 @@ def update_document(doc_id: int, doc: DocumentUpdate):
         "tgl_awal": doc.tgl_awal or "-",
         "tgl_akhir": doc.tgl_akhir or "-",
         "durasi_hk": doc.durasi_hk or "-",
-        "waktu_input": get_wib_now().strftime("%d/%m/%Y %H:%M:%S")
+        "waktu_input": get_wib_now().strftime("%d/%m/%Y %H:%M:%S"),
+        "file_base64": doc.file_base64,
+        "file_name": clean_file_name,
+        "file_url": doc.file_url,
+        "file_mime": "application/pdf"
     }
-    sync_to_google_sheets(sheets_update_payload)
+    sync_to_google_sheets(sheets_update_payload, doc_id=doc_id)
 
     return {"status": "success", "perubahan_dicatat": len(perubahan) > 0}
 
