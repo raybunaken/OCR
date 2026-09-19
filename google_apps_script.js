@@ -6,6 +6,12 @@
 
 var FOLDER_ID = "1asIe62GFX6b7SWjaXDcGx--2_l1-dJOg";
 
+// Fungsi untuk cek & aktivasi izin Drive (Cukup klik 'Run'/'Jalankan' sekali di editor)
+function testDrivePermission() {
+  var folder = DriveApp.getFolderById(FOLDER_ID);
+  Logger.log("BERHASIL! Folder Drive terhubung: " + folder.getName());
+}
+
 function doGet(e) {
   return ContentService.createTextOutput(JSON.stringify({
     status: "ok",
@@ -36,6 +42,7 @@ function doPost(e) {
     }
 
     var fileUrl = data.file_url || "";
+    var fileError = "";
 
     // 1. Simpan file PDF ke Google Drive jika ada file_base64
     if (data.file_base64) {
@@ -46,11 +53,17 @@ function doPost(e) {
         var blob = Utilities.newBlob(decodedBytes, data.file_mime || "application/pdf", fileName);
         
         var driveFile = folder.createFile(blob);
-        // Izinkan siapa saja yang memiliki tautan untuk melihat berkas
-        driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
         fileUrl = driveFile.getUrl();
+
+        // Coba set sharing publik jika diperbolehkan akun
+        try {
+          driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {
+          // Akun Google Workspace mungkin membatasi public sharing
+        }
       } catch (fileErr) {
-        console.error("Gagal menyimpan file ke Drive:", fileErr);
+        fileError = fileErr.toString();
+        console.error("Gagal membuat file di Google Drive:", fileErr);
       }
     }
 
@@ -78,7 +91,8 @@ function doPost(e) {
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
         action: "INSERT",
-        file_url: fileUrl
+        file_url: fileUrl,
+        file_error: fileError
       })).setMimeType(ContentService.MimeType.JSON);
 
     } else if (action === "UPDATE") {
@@ -113,7 +127,8 @@ function doPost(e) {
         status: "success",
         action: "UPDATE",
         updated: updated,
-        file_url: fileUrl
+        file_url: fileUrl,
+        file_error: fileError
       })).setMimeType(ContentService.MimeType.JSON);
 
     } else if (action === "DELETE") {
