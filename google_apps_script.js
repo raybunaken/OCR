@@ -72,8 +72,6 @@ function doPost(e) {
 
     // 2. Eksekusi Aksi (INSERT, UPDATE, DELETE)
     if (action === "INSERT") {
-      var linkCell = fileUrl ? '=HYPERLINK("' + fileUrl + '", "Buka PDF")' : "-";
-      
       var newRow = [
         data.nomor_identitas || data.no_polis || "-",
         data.kode_jenis || data.jenis_bond || "PB",
@@ -86,10 +84,24 @@ function doPost(e) {
         data.tgl_akhir || "-",
         data.durasi_hk || "-",
         data.waktu_input || Utilities.formatDate(new Date(), "GMT+7", "dd/MM/yyyy HH:mm:ss"),
-        linkCell
+        fileUrl || "-"
       ];
 
       sheet.appendRow(newRow);
+
+      // Buat tautan teks 'Buka PDF' native (bebas error formula di semua bahasa Google Sheets)
+      if (fileUrl) {
+        try {
+          var lastRow = sheet.getLastRow();
+          var richText = SpreadsheetApp.newRichTextValue()
+            .setText("Buka PDF")
+            .setLinkUrl(fileUrl)
+            .build();
+          sheet.getRange(lastRow, 12).setRichTextValue(richText);
+        } catch (richErr) {
+          console.error("Gagal set rich text link:", richErr);
+        }
+      }
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
@@ -119,7 +131,15 @@ function doPost(e) {
           sheet.getRange(rowIndex, 10).setValue(data.durasi_hk || "-");
           sheet.getRange(rowIndex, 11).setValue(data.waktu_input || Utilities.formatDate(new Date(), "GMT+7", "dd/MM/yyyy HH:mm:ss"));
           if (fileUrl) {
-            sheet.getRange(rowIndex, 12).setValue('=HYPERLINK("' + fileUrl + '", "Buka PDF")');
+            try {
+              var richText = SpreadsheetApp.newRichTextValue()
+                .setText("Buka PDF")
+                .setLinkUrl(fileUrl)
+                .build();
+              sheet.getRange(rowIndex, 12).setRichTextValue(richText);
+            } catch (richErr) {
+              sheet.getRange(rowIndex, 12).setValue(fileUrl);
+            }
           }
           updated = true;
           break;
