@@ -9,7 +9,7 @@ import requests
 import threading
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional
+from typing import Optional, List
 import urllib.request
 from pydantic import BaseModel
 import psycopg2
@@ -283,6 +283,9 @@ class DocumentUpdate(BaseModel):
     file_base64: Optional[str] = None
     file_name: Optional[str] = None
     file_url: Optional[str] = None
+
+class BulkDeleteRequest(BaseModel):
+    ids: List[int]
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -820,6 +823,55 @@ def delete_document(doc_id: int):
         return {"status": "success"}
     except Exception as e:
         print("ERROR DELETE:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/documents/bulk-delete")
+def bulk_delete_documents(req: BulkDeleteRequest):
+    if not req.ids:
+        return {"status": "success", "deleted_count": 0}
+    try:
+        deleted_docs = []
+        with get_db_cursor(commit=True, dict_cursor=True) as cursor:
+            # 1. Ambil detail dokumen yang akan dihapus untuk sinkronisasi Google Sheets
+            cursor.execute("SELECT * FROM dokumen WHERE id = ANY(%s)", (req.ids,))
+            rows = cursor.fetchall()
+            deleted_docs = [dict(r) for r in rows]
+            
+            # 2. Hapus audit logs terkait
+            cursor.execute("DELETE FROM audit_logs WHERE doc_id = ANY(%s)", (req.ids,))
+            
+            # 3. Hapus data dokumen
+            cursor.execute("DELETE FROM dokumen WHERE id = ANY(%s)", (req.ids,))
+            
+        # 4. Sinkronisasi HAPUS ke Google Sheets di background thread
+        if deleted_docs:
+            def _sync_bulk():
+                webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbyqR2iO8lRtSNnJQWWzUXqHAqSpLYF5w2E5I10E-LPsViQpVUBymdEMRzjG_BnIRcqX8g/exec")
+                if not webhook_url:
+                    return
+                for doc in deleted_docs:
+                    try:
+                        doc_env = doc["env"] if "env" in doc.keys() and doc["env"] else "production"
+                        delete_payload = {
+                            "action": "DELETE",
+                            "env": doc_env,
+                            "sheet_name": "TESTING" if (doc_env == "testing") else "REGISTER SURETY BOND",
+                            "nomor_identitas": doc["nomor_identitas"],
+                            "no_polis": doc["nomor_identitas"],
+                            "nama_klien": doc["nama_klien"],
+                            "principal": doc["nama_klien"],
+                            "nilai_proyek": doc["nilai_proyek"]
+                        }
+                        requests.post(webhook_url, json=delete_payload, timeout=20)
+                        time.sleep(0.3)
+                    except Exception as sync_err:
+                        print(f"ERROR BULK DELETE SYNC for doc {doc.get('id')}:", sync_err)
+                        
+            threading.Thread(target=_sync_bulk, daemon=True).start()
+            
+        return {"status": "success", "deleted_count": len(deleted_docs)}
+    except Exception as e:
+        print("ERROR BULK DELETE:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/documents/{doc_id}")

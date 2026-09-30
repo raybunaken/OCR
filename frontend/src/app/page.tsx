@@ -30,6 +30,9 @@ export default function Home() {
   const [isLoadingDocs, setIsLoadingDocs] = useState(false);
   const [deleteModalData, setDeleteModalData] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [selectedDocIds, setSelectedDocIds] = useState<number[]>([]);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
   const [isCopiedExcel, setIsCopiedExcel] = useState(false);
   const [isCopiedText, setIsCopiedText] = useState(false);
   const [isCopiedOcr, setIsCopiedOcr] = useState(false);
@@ -329,6 +332,7 @@ export default function Home() {
       const data = await res.json();
       if (Array.isArray(data)) {
         setDocuments(data);
+        setSelectedDocIds((prev) => prev.filter((id) => data.some((d: any) => d.id === id)));
         if (isManual) {
           if (data.length === 0) {
             toast.info("Data berhasil disegarkan: Belum ada dokumen di database produksi.");
@@ -751,6 +755,7 @@ export default function Home() {
       const res = await fetch(`${API_URL}/api/documents/${deleteModalData.id}`, { method: "DELETE" });
       if (res.ok) {
         toast.success("Dokumen berhasil dihapus selamanya!");
+        setSelectedDocIds((prev) => prev.filter((id) => id !== deleteModalData.id));
         await fetchDocuments();
       } else {
         toast.error("Gagal menghapus dokumen");
@@ -1156,6 +1161,55 @@ export default function Home() {
     return 0;
   });
 
+  const isAllSelected = 
+    filteredDocuments.length > 0 && 
+    filteredDocuments.every((doc: any) => selectedDocIds.includes(doc.id));
+
+  const isSomeSelected = 
+    selectedDocIds.length > 0 && !isAllSelected;
+
+  const toggleSelectDoc = (id: number) => {
+    setSelectedDocIds((prev) => 
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      const filteredIds = new Set(filteredDocuments.map((doc: any) => doc.id));
+      setSelectedDocIds((prev) => prev.filter((id) => !filteredIds.has(id)));
+    } else {
+      const filteredIds = filteredDocuments.map((doc: any) => doc.id);
+      setSelectedDocIds((prev) => Array.from(new Set([...prev, ...filteredIds])));
+    }
+  };
+
+  const confirmBulkDelete = async () => {
+    if (selectedDocIds.length === 0 || isBulkDeleting) return;
+    setIsBulkDeleting(true);
+    try {
+      const res = await fetch(`${API_URL}/api/documents/bulk-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedDocIds })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const count = data.deleted_count || selectedDocIds.length;
+        toast.success(`${count} dokumen berhasil dihapus permanen!`);
+        setSelectedDocIds([]);
+        await fetchDocuments();
+      } else {
+        toast.error("Gagal menghapus dokumen terpilih");
+      }
+    } catch (e) {
+      toast.error("Kesalahan jaringan atau server sedang memuat");
+    } finally {
+      setIsBulkDeleting(false);
+      setBulkDeleteModalOpen(false);
+    }
+  };
+
   const fetchAuditLogs = async (docId: number) => {
     try {
       const res = await fetch(`${API_URL}/api/documents/${docId}/logs`);
@@ -1338,7 +1392,21 @@ export default function Home() {
                   <p className="text-slate-400 text-xs sm:text-sm mt-1">Daftar seluruh riwayat dokumen asuransi yang tersimpan</p>
                 </div>
 
-                <div className="flex items-center gap-2.5 self-stretch sm:self-auto">
+                <div className="flex items-center gap-2.5 self-stretch sm:self-auto flex-wrap sm:flex-nowrap">
+                  {selectedDocIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setBulkDeleteModalOpen(true)}
+                      className="bg-red-600 hover:bg-red-500 text-white px-5 py-3 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-lg shadow-red-600/30 flex items-center gap-2 border border-red-400/40 cursor-pointer animate-in fade-in"
+                      title="Hapus seluruh dokumen terpilih secara permanen"
+                    >
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      <span>Hapus ({selectedDocIds.length})</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={() => fetchDocuments(true)}
@@ -1501,11 +1569,64 @@ export default function Home() {
                   </button>
                 </div>
               )}
+
+              {/* Active Selection Banner for Bulk Actions */}
+              {selectedDocIds.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-sky-950/60 border border-sky-500/40 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200 shadow-lg shadow-sky-950/30">
+                  <div className="flex items-center gap-3">
+                    <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse" />
+                    <span className="text-xs sm:text-sm font-semibold text-white">
+                      <strong className="text-sky-300">{selectedDocIds.length}</strong> dokumen dipilih dari total {filteredDocuments.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allFilteredIds = filteredDocuments.map((d: any) => d.id);
+                        setSelectedDocIds(Array.from(new Set([...selectedDocIds, ...allFilteredIds])));
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all cursor-pointer"
+                    >
+                      Pilih Semua ({filteredDocuments.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDocIds([])}
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition-all cursor-pointer"
+                    >
+                      Batalkan Pilihan
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBulkDeleteModalOpen(true)}
+                      className="px-4 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white shadow-md shadow-red-600/30 border border-red-400/40 transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      <span>Hapus Terpilih ({selectedDocIds.length})</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="overflow-x-auto min-h-[300px]">
               <table className="w-full text-left text-sm sm:text-base">
                 <thead className="bg-slate-800/60 text-slate-300">
                   <tr>
+                    <th className="py-4.5 px-4 w-12 text-center">
+                      <input 
+                        type="checkbox"
+                        checked={isAllSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = isSomeSelected;
+                        }}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded text-sky-500 bg-slate-900 border-slate-700 focus:ring-sky-500 focus:ring-offset-slate-900 cursor-pointer accent-sky-500"
+                        title={isAllSelected ? "Batalkan pilihan semua" : "Pilih semua dokumen"}
+                      />
+                    </th>
                     <th className="py-4.5 px-5 font-semibold text-xs sm:text-sm uppercase tracking-wider">Tanggal Dibuat</th>
                     <th className="py-4.5 px-5 font-semibold text-xs sm:text-sm uppercase tracking-wider">Nama Klien</th>
                     <th className="py-4.5 px-5 font-semibold text-xs sm:text-sm uppercase tracking-wider">Jenis Jaminan</th>
@@ -1516,7 +1637,7 @@ export default function Home() {
                 <tbody className="divide-y divide-slate-700/50">
                   {isLoadingDocs ? (
                     <tr>
-                      <td colSpan={5} className="p-12 text-center">
+                      <td colSpan={6} className="p-12 text-center">
                         <div className="flex flex-col items-center justify-center gap-3">
                           <svg className="animate-spin h-7 w-7 text-sky-400" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -1529,7 +1650,7 @@ export default function Home() {
                     </tr>
                   ) : documents.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="p-10 text-center text-slate-400">
+                      <td colSpan={6} className="p-10 text-center text-slate-400">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <p className="text-sm text-slate-300 font-medium">Belum ada data dokumen di server produksi.</p>
                           <p className="text-xs text-slate-500">Dokumen baru yang diekstrak dan disimpan akan otomatis tercatat di sini.</p>
@@ -1547,7 +1668,7 @@ export default function Home() {
                     </tr>
                   ) : filteredDocuments.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="p-10 text-center text-slate-400">
+                      <td colSpan={6} className="p-10 text-center text-slate-400">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <p className="text-sm text-slate-300 font-medium">Pencarian atau filter tidak menemukan hasil.</p>
                           <p className="text-xs text-slate-500">Coba ubah kata kunci pencarian atau reset filter yang aktif.</p>
@@ -1562,9 +1683,23 @@ export default function Home() {
                       </td>
                     </tr>
                   ) : (
-                    filteredDocuments.map((doc: any) => (
-                      <tr key={doc.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="py-4.5 px-5 text-slate-300">
+                    filteredDocuments.map((doc: any) => {
+                      const isSelected = selectedDocIds.includes(doc.id);
+                      return (
+                        <tr 
+                          key={doc.id} 
+                          className={`transition-colors ${isSelected ? "bg-sky-950/25 hover:bg-sky-950/40" : "hover:bg-slate-800/40"}`}
+                        >
+                          <td className="py-4.5 px-4 text-center">
+                            <input 
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelectDoc(doc.id)}
+                              className="w-4 h-4 rounded text-sky-500 bg-slate-900 border-slate-700 focus:ring-sky-500 focus:ring-offset-slate-900 cursor-pointer accent-sky-500"
+                              title={`Pilih dokumen ${doc.nama_klien}`}
+                            />
+                          </td>
+                          <td className="py-4.5 px-5 text-slate-300">
                           <div className="font-semibold text-slate-100 text-sm sm:text-base whitespace-nowrap">
                             {doc.created_at ? doc.created_at.substring(0, 10) : "-"}
                           </div>
@@ -1704,7 +1839,8 @@ export default function Home() {
                           </button>
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -2835,6 +2971,55 @@ export default function Home() {
                   </>
                 ) : (
                   "Ya, Hapus Permanen"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Hapus Massal */}
+      {bulkDeleteModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => !isBulkDeleting && setBulkDeleteModalOpen(false)}
+        >
+          <div 
+            className="bg-slate-800 border border-slate-700 p-8 rounded-3xl shadow-2xl max-w-md w-full animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center mb-6">
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-2">Hapus {selectedDocIds.length} Dokumen Sekaligus?</h3>
+            <p className="text-slate-400 text-sm mb-8 leading-relaxed">
+              Apakah Anda yakin ingin menghapus <strong className="text-white">{selectedDocIds.length} dokumen</strong> yang telah dipilih? Tindakan ini bersifat permanen dan akan menghapus seluruh data terpilih dari database server serta Google Sheets.
+            </p>
+            <div className="flex justify-end gap-4">
+              <button 
+                onClick={() => setBulkDeleteModalOpen(false)} 
+                disabled={isBulkDeleting}
+                className="px-6 py-2.5 rounded-full text-sm font-medium text-slate-300 hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={confirmBulkDelete} 
+                disabled={isBulkDeleting}
+                className="px-6 py-2.5 rounded-full text-sm font-semibold bg-red-600 hover:bg-red-500 text-white transition-colors shadow-lg shadow-red-500/30 cursor-pointer disabled:opacity-50 flex items-center gap-2"
+              >
+                {isBulkDeleting ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Menghapus {selectedDocIds.length} Dokumen...
+                  </>
+                ) : (
+                  `Ya, Hapus (${selectedDocIds.length})`
                 )}
               </button>
             </div>
