@@ -33,6 +33,7 @@ export default function Home() {
   const [selectedDocIds, setSelectedDocIds] = useState<number[]>([]);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
+  const [isExportingBatch, setIsExportingBatch] = useState(false);
   const [isCopiedExcel, setIsCopiedExcel] = useState(false);
   const [isCopiedText, setIsCopiedText] = useState(false);
   const [isCopiedOcr, setIsCopiedOcr] = useState(false);
@@ -678,6 +679,60 @@ export default function Home() {
         prev.map((f) => (f.id === id ? { ...f, status: "error", errorMsg: err.message } : f))
       );
       toast.error(`Coba lagi gagal: ${err.message}`);
+    }
+  };
+
+  const handleDownloadBatchExcel = async () => {
+    const doneItems = batchFiles.filter((item) => item.status === "done" && item.data);
+    if (doneItems.length === 0) {
+      toast.error("Belum ada dokumen batch yang selesai diproses untuk diunduh.");
+      return;
+    }
+
+    setIsExportingBatch(true);
+    try {
+      const docsPayload = doneItems.map((item) => {
+        const ext = item.data;
+        return {
+          nomor_identitas: ext.nomor_jaminan || "-",
+          kode_jenis: ext.kode_jenis || "PB",
+          jenis_dokumen: ext.jenis_jaminan || "-",
+          nama_klien: ext.principal || "-",
+          obligee: ext.obligee || "-",
+          pekerjaan: ext.pekerjaan || "-",
+          nilai_proyek: ext.nilai_jaminan || "-",
+          tgl_terbit: ext.tgl_terbit || ext.tgl_awal || "-",
+          tgl_awal: ext.tgl_awal || "-",
+          tgl_akhir: ext.tgl_akhir || "-",
+          durasi_hk: String(ext.durasi_hk || calculateDays(ext.masa_berlaku) || "-")
+        };
+      });
+
+      const res = await fetch(`${API_URL}/api/documents/export/batch-excel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documents: docsPayload })
+      });
+
+      if (!res.ok) {
+        throw new Error("Gagal mengunduh file Excel batch");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Rekap_Batch_${doneItems.length}_Dokumen_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success(`File Excel rekap batch berhasil diunduh (${doneItems.length} dokumen)!`);
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Gagal mengunduh file Excel batch.");
+    } finally {
+      setIsExportingBatch(false);
     }
   };
 
@@ -2744,13 +2799,27 @@ export default function Home() {
                               </button>
 
                               <button
-                                onClick={() => window.open(`${API_URL}/api/documents/export/excel`, "_blank")}
-                                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/30 cursor-pointer flex items-center justify-center gap-1.5"
+                                onClick={handleDownloadBatchExcel}
+                                disabled={isExportingBatch}
+                                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/30 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                title="Unduh rekap file Excel khusus untuk dokumen pada antrian batch ini"
                               >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                <span>Unduh Excel</span>
+                                {isExportingBatch ? (
+                                  <>
+                                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    <span>Mengunduh...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <span>Unduh Excel Batch ({batchFiles.filter((item) => item.status === "done").length})</span>
+                                  </>
+                                )}
                               </button>
                             </div>
                           </div>

@@ -9,7 +9,7 @@ import requests
 import threading
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import urllib.request
 from pydantic import BaseModel
 import psycopg2
@@ -286,6 +286,9 @@ class DocumentUpdate(BaseModel):
 
 class BulkDeleteRequest(BaseModel):
     ids: List[int]
+
+class ExportBatchRequest(BaseModel):
+    documents: List[Dict[str, Any]]
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -983,19 +986,14 @@ def get_audit_logs(doc_id: int):
             result.append(log_dict)
         return result
 
-@app.get("/api/documents/export/excel")
-def export_documents_excel():
-    with get_db_cursor(dict_cursor=True) as cursor:
-        cursor.execute("SELECT * FROM dokumen ORDER BY id ASC")
-        docs = cursor.fetchall()
-
+def generate_excel_response(docs, title="REGISTER LAPORAN SURETY BOND & BANK GARANSI", filename_prefix="Register_Surety_Bond"):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "REGISTER SURETY BOND"
 
     # Title Header
     ws.merge_cells("A1:J1")
-    ws["A1"] = "REGISTER LAPORAN SURETY BOND & BANK GARANSI"
+    ws["A1"] = title
     ws["A1"].font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
     ws["A1"].fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
@@ -1028,12 +1026,12 @@ def export_documents_excel():
     alt_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
     for r_idx, doc in enumerate(docs, 3):
         d = dict(doc)
-        no_polis = d.get("nomor_identitas") or "-"
-        jenis_bond = d.get("kode_jenis") or ("MB" if "pemeliharaan" in str(d.get("jenis_dokumen", "")).lower() else "PB" if "pelaksanaan" in str(d.get("jenis_dokumen", "")).lower() else "APB" if "uang muka" in str(d.get("jenis_dokumen", "")).lower() else "BB" if "penawaran" in str(d.get("jenis_dokumen", "")).lower() else "PB")
-        principal = d.get("nama_klien") or "-"
+        no_polis = d.get("nomor_identitas") or d.get("nomor_jaminan") or "-"
+        jenis_bond = d.get("kode_jenis") or ("MB" if "pemeliharaan" in str(d.get("jenis_dokumen", "") or d.get("jenis_jaminan", "")).lower() else "PB" if "pelaksanaan" in str(d.get("jenis_dokumen", "") or d.get("jenis_jaminan", "")).lower() else "APB" if "uang muka" in str(d.get("jenis_dokumen", "") or d.get("jenis_jaminan", "")).lower() else "BB" if "penawaran" in str(d.get("jenis_dokumen", "") or d.get("jenis_jaminan", "")).lower() else "PB")
+        principal = d.get("nama_klien") or d.get("principal") or "-"
         obligee = d.get("obligee") or "-"
         pekerjaan = d.get("pekerjaan") or "-"
-        nilai_bond = d.get("nilai_proyek") or "-"
+        nilai_bond = d.get("nilai_proyek") or d.get("nilai_jaminan") or "-"
         tgl_terbit = d.get("tgl_terbit") or d.get("tgl_awal") or "-"
         tgl_awal = d.get("tgl_awal") or "-"
         tgl_akhir = d.get("tgl_akhir") or "-"
@@ -1064,9 +1062,34 @@ def export_documents_excel():
     wb.save(buffer)
     buffer.seek(0)
 
-    filename = f"Register_Surety_Bond_{get_wib_now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"{filename_prefix}_{get_wib_now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return Response(
         content=buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+@app.get("/api/documents/export/excel")
+def export_documents_excel(ids: Optional[str] = None, env: Optional[str] = None):
+    with get_db_cursor(dict_cursor=True) as cursor:
+        if ids:
+            id_list = [int(x.strip()) for x in ids.split(",") if x.strip().isdigit()]
+            if id_list:
+                cursor.execute("SELECT * FROM dokumen WHERE id = ANY(%s) ORDER BY id ASC", (id_list,))
+            else:
+                cursor.execute("SELECT * FROM dokumen ORDER BY id ASC")
+        elif env:
+            cursor.execute("SELECT * FROM dokumen WHERE env = %s ORDER BY id ASC", (env,))
+        else:
+            cursor.execute("SELECT * FROM dokumen ORDER BY id ASC")
+        docs = cursor.fetchall()
+
+    return generate_excel_response(docs, "REGISTER LAPORAN SURETY BOND & BANK GARANSI", "Register_Surety_Bond")
+
+@app.post("/api/documents/export/batch-excel")
+def export_batch_excel(req: ExportBatchRequest):
+    docs = req.documents or []
+    count = len(docs)
+    title = f"REKAP HASIL UNGGAH BATCH ({count} DOKUMEN)"
+    prefix = f"Rekap_Batch_{count}_Dokumen"
+    return generate_excel_response(docs, title, prefix)
