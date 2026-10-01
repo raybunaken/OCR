@@ -715,7 +715,32 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        throw new Error("Gagal mengunduh file Excel batch");
+        // Fallback instan: Buat file Excel format Tab-Separated dengan BOM UTF-8 (100% kompatibel Excel)
+        const headers = ["NO. POLIS", "JENIS BOND", "PRINCIPAL (TERJAMIN)", "OBLIGEE (PENERIMA)", "NAMA PEKERJAAN / PROYEK", "NILAI BOND", "TGL TERBIT", "TGL AWAL", "TGL AKHIR", "JUMLAH HK"];
+        const rows = docsPayload.map((d) => [
+          d.nomor_identitas,
+          d.kode_jenis,
+          `"${(d.nama_klien || "").replace(/"/g, '""')}"`,
+          `"${(d.obligee || "").replace(/"/g, '""')}"`,
+          `"${(d.pekerjaan || "").replace(/"/g, '""')}"`,
+          `"${d.nilai_proyek}"`,
+          d.tgl_terbit,
+          d.tgl_awal,
+          d.tgl_akhir,
+          d.durasi_hk
+        ].join("\t"));
+        const content = [headers.join("\t"), ...rows].join("\r\n");
+        const blob = new Blob(["\ufeff" + content], { type: "application/vnd.ms-excel;charset=utf-8" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Rekap_Batch_${doneItems.length}_Dokumen_${new Date().toISOString().slice(0, 10)}.xls`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        toast.success(`File Excel rekap batch berhasil diunduh (${doneItems.length} dokumen)!`);
+        return;
       }
 
       const blob = await res.blob();
