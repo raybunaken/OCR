@@ -371,6 +371,52 @@ export default function Home() {
     }
   };
 
+    // Helper pemanggilan fetch dengan timeout otomatis & AbortController (mencegah antrian gantung/stuck)
+  const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 75000): Promise<Response> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      return res;
+    } catch (err: any) {
+      if (err.name === "AbortError" || err.message?.includes("aborted")) {
+        throw new Error(`Waktu tunggu server habis (> ${Math.round(timeoutMs / 1000)} detik). Silakan coba lagi.`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  // Helper pra-pemanasan (pre-warm) server backend agar dokumen pertama tidak terkena cold-start drop
+  const ensureBackendReady = async (): Promise<boolean> => {
+    try {
+      const ping = await fetchWithTimeout(`${API_URL}/health`, { method: "GET" }, 5000);
+      if (ping.ok) return true;
+    } catch (e) {
+      // Backend might be sleeping
+    }
+    toast.info("Menghubungkan ke server backend (membangunkan server)... Harap tunggu sebentar.");
+    const maxTries = 8;
+    for (let i = 1; i <= maxTries; i++) {
+      if (stopBatchRef.current) return false;
+      try {
+        const ping = await fetchWithTimeout(`${API_URL}/health`, { method: "GET" }, 12000);
+        if (ping.ok) {
+          toast.success("Server backend siap! Memulai pemrosesan dokumen...");
+          return true;
+        }
+      } catch (err) {
+        // server is still booting
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    return false;
+  };
+
   const handleUpload = async () => {
     if (!file) return;
     setIsUploading(true);
@@ -387,10 +433,10 @@ export default function Home() {
     formData.append("file", file);
 
     try {
-      const res = await fetch(`${API_URL}/api/extract`, {
+      const res = await fetchWithTimeout(`${API_URL}/api/extract`, {
         method: "POST",
         body: formData,
-      });
+      }, 75000);
       const result = await res.json();
       const elapsedSecs = Math.max(1, Math.round((Date.now() - startTimestamp) / 1000));
       setLastProcessDuration(elapsedSecs);
@@ -450,6 +496,14 @@ export default function Home() {
     setIsBatchProcessing(true);
     stopBatchRef.current = false;
 
+    // Pastikan server backend bangun sebelum antrian dokumen pertama dikirim
+    const isReady = await ensureBackendReady();
+    if (!isReady && !stopBatchRef.current) {
+      toast.error("Server backend belum dapat dihubungi. Periksa koneksi server lalu coba lagi.");
+      setIsBatchProcessing(false);
+      return;
+    }
+
     let successCount = 0;
     let errorCount = 0;
 
@@ -474,11 +528,28 @@ export default function Home() {
         const formData = new FormData();
         formData.append("file", item.file);
 
-        // 1. Ekstrak AI
-        const res = await fetch(`${API_URL}/api/extract`, {
-          method: "POST",
-          body: formData,
-        });
+        // 1. Ekstrak AI dengan batas waktu 75s & toleransi retry 1x untuk jitter jaringan
+        let res: Response | null = null;
+        let lastNetErr: any = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (stopBatchRef.current) break;
+          try {
+            res = await fetchWithTimeout(`${API_URL}/api/extract`, {
+              method: "POST",
+              body: formData,
+            }, 75000);
+            if (res.ok) break;
+          } catch (netErr: any) {
+            lastNetErr = netErr;
+            if (attempt === 0 && !stopBatchRef.current) {
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+          }
+        }
+
+        if (!res) {
+          throw lastNetErr || new Error("Gagal menghubungi server ekstraksi");
+        }
         const result = await res.json();
 
         if (res.ok && result.status === "success" && result.data) {
@@ -539,11 +610,11 @@ export default function Home() {
             file_name: batchFileName
           };
 
-          await fetch(`${API_URL}/api/documents`, {
+          await fetchWithTimeout(`${API_URL}/api/documents`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
-          });
+          }, 45000);
 
           // Mark as done
           setBatchFiles((prev) =>
@@ -599,10 +670,10 @@ export default function Home() {
       const formData = new FormData();
       formData.append("file", targetItem.file);
 
-      const res = await fetch(`${API_URL}/api/extract`, {
+      const res = await fetchWithTimeout(`${API_URL}/api/extract`, {
         method: "POST",
         body: formData,
-      });
+      }, 75000);
       const result = await res.json();
 
       if (res.ok && result.status === "success" && result.data) {
@@ -660,11 +731,11 @@ export default function Home() {
           file_name: retryFileName
         };
 
-        await fetch(`${API_URL}/api/documents`, {
+        await fetchWithTimeout(`${API_URL}/api/documents`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
-        });
+        }, 45000);
 
         setBatchFiles((prev) =>
           prev.map((f) => (f.id === id ? { ...f, status: "done", data: extracted } : f))

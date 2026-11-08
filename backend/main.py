@@ -42,11 +42,12 @@ def call_groq_api(max_retries=2, backoff_seconds=3, **kwargs):
     if not groq_clients:
         raise Exception("Tidak ada GROQ_API_KEY yang dikonfigurasi.")
         
+    timeout_val = kwargs.pop("timeout", 35.0)
     last_exception = None
     for attempt in range(max_retries + 1):
         for i, client in enumerate(groq_clients):
             try:
-                return client.chat.completions.create(**kwargs)
+                return client.chat.completions.create(timeout=timeout_val, **kwargs)
             except Exception as e:
                 last_exception = e
                 error_str = str(e).lower()
@@ -388,6 +389,56 @@ def clean_repetition_loops(text: str) -> str:
     cleaned = re.sub(r'(\b[A-Za-z0-9_\s\/\.-]{6,60}?\b)(?:\s*[\/,;.-]?\s*\1){2,}', r'\1', cleaned, flags=re.IGNORECASE)
     return cleaned
 
+def apply_deterministic_postprocessing(result_data, teks_mentah):
+    """Normalisasi tanggal, durasi HK, dan nomor jaminan secara deterministik cepat."""
+    # 1. Jika tgl_awal atau tgl_akhir kosong/'-', cari dari masa_berlaku atau teks mentah
+    if not result_data.get("tgl_awal") or result_data["tgl_awal"] == "-" or not result_data.get("tgl_akhir") or result_data["tgl_akhir"] == "-":
+        dates_in_masa = parse_dates_from_text(result_data.get("masa_berlaku", ""))
+        if len(dates_in_masa) >= 2:
+            if not result_data.get("tgl_awal") or result_data["tgl_awal"] == "-":
+                result_data["tgl_awal"] = dates_in_masa[0]
+            if not result_data.get("tgl_akhir") or result_data["tgl_akhir"] == "-":
+                result_data["tgl_akhir"] = dates_in_masa[1]
+        else:
+            all_dates = parse_dates_from_text(teks_mentah)
+            if len(all_dates) >= 2:
+                if not result_data.get("tgl_awal") or result_data["tgl_awal"] == "-":
+                    result_data["tgl_awal"] = all_dates[0]
+                if not result_data.get("tgl_akhir") or result_data["tgl_akhir"] == "-":
+                    result_data["tgl_akhir"] = all_dates[1]
+
+    # 2. Jika tgl_terbit kosong/'-', cari tanggal SPPBJ / Surat / atau gunakan tgl_awal
+    if not result_data.get("tgl_terbit") or result_data["tgl_terbit"] == "-":
+        sppbj_match = re.search(r'(?:SPPBJ|Surat|Tanggal|Tgl)[^\n\r]*?(\d{1,2}\s+(?:Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Nopember|Desember)\s+\d{4})', teks_mentah, re.IGNORECASE)
+        if sppbj_match:
+            parsed = parse_dates_from_text(sppbj_match.group(1))
+            if parsed:
+                result_data["tgl_terbit"] = parsed[0]
+        elif result_data.get("tgl_awal") and result_data["tgl_awal"] != "-":
+            result_data["tgl_terbit"] = result_data["tgl_awal"]
+
+    # 3. Jika durasi_hk kosong/'-', cari angka hari
+    if not result_data.get("durasi_hk") or result_data["durasi_hk"] == "-":
+        dur_match = re.search(r'(\d+)\s*(?:HK|Hari|hari kalender|hari kerja)', result_data.get("masa_berlaku", "") + " " + teks_mentah, re.IGNORECASE)
+        if dur_match:
+            result_data["durasi_hk"] = dur_match.group(1)
+
+    # 4. Jika nomor_jaminan kosong/'-', cari nomor SPPBJ / Surat / Jaminan / Permohonan
+    if not result_data.get("nomor_jaminan") or result_data["nomor_jaminan"] == "-":
+        no_patterns = [
+            r'(?:SPPBJ|Polis|Jaminan|Sertifikat|Kontrak|Permohonan)\s*(?:No\.?|Nomor)\s*[:\.]?\s*([A-Za-z0-9\.\/\-]{6,})',
+            r'(?:No\.?|Nomor)\s*(?:SPPBJ|Polis|Jaminan|Sertifikat|Kontrak|Permohonan)\s*[:\.]?\s*([A-Za-z0-9\.\/\-]{6,})',
+            r'SPPBJ\s*No\.?\s*[:\.]?\s*([A-Za-z0-9\.\/\-]{6,})'
+        ]
+        for pat in no_patterns:
+            m = re.search(pat, teks_mentah, re.IGNORECASE)
+            if m:
+                val = m.group(1).strip().strip('.')
+                if not re.match(r'^\d{1,2}/\d{1,2}/\d{4}$', val):
+                    result_data["nomor_jaminan"] = val
+                    break
+    return result_data
+
 def rapikan_teks(teks_mentah):
     teks_mentah = clean_repetition_loops(teks_mentah)
     fallback_data = {
@@ -456,26 +507,24 @@ def rapikan_teks(teks_mentah):
     except Exception as e:
         print("ERROR AI EXTRACTION ATTEMPT 1:", e)
         
-    # Auto-Retry Loop jika ada kolom penting yang masih '-' (Maksimal 3 kali percobaan bertarget)
-    critical_keys = ["principal", "obligee", "nilai_jaminan", "pekerjaan", "masa_berlaku", "jenis_jaminan", "durasi_hk", "tgl_awal", "tgl_akhir"]
-    max_retries = 3
-    for attempt in range(2, max_retries + 1):
-        missing_keys = [k for k in critical_keys if not result_data.get(k) or result_data[k] == "-"]
-        if not missing_keys:
-            break
-            
-        print(f"AUTO-RETRY {attempt}/{max_retries} for missing keys: {missing_keys}")
+    # Jalankan post-processing deterministik terlebih dahulu (hemat waktu & kuota token)
+    result_data = apply_deterministic_postprocessing(result_data, teks_mentah)
+
+    # Auto-Retry Target hanya jika ada kolom pokok yang masih '-' (maksimal 1x retry target)
+    core_keys = ["principal", "obligee", "nilai_jaminan", "pekerjaan"]
+    missing_core = [k for k in core_keys if not result_data.get(k) or result_data[k] == "-"]
+    if missing_core:
+        print(f"TARGETED RETRY for missing core keys: {missing_core}")
         retry_prompt = (
-            f"PERHATIAN: Kolom penting berikut belum ditemukan pada pembacaan awal: {', '.join(missing_keys)}.\n"
+            f"PERHATIAN: Kolom penting berikut belum ditemukan pada pembacaan awal: {', '.join(missing_core)}.\n"
             "Mohon teliti kembali teks dokumen di bawah ini secara mendalam baris demi baris.\n"
             "Petunjuk Khusus:\n"
             "- Jika 'obligee' belum ada: cari bagian PENERIMA JAMINAN, PEMILIK PROYEK, PEJABAT PEMBUAT KOMITMEN (PPK), DINAS, INSTANSI, atau PERUSAHAAN PEMBERI KERJA.\n"
             "- Jika 'principal' belum ada: cari bagian PEMOHON, TERJAMIN, PENYEDIA JASA, NAMA PERUSAHAAN (PT/CV).\n"
             "- Jika 'nilai_jaminan' belum ada: cari simbol 'Rp', nilai jaminan %, atau nominal angka kontrak.\n"
-            "- Jika 'pekerjaan' belum ada: cari nama paket pekerjaan, pengadaan barang/jasa, atau pembangunan.\n"
-            "- Jika 'durasi_hk' atau tanggal belum ada: cari angka hari kalender/kerja (HK) dan rentang tanggal (s/d).\n\n"
+            "- Jika 'pekerjaan' belum ada: cari nama paket pekerjaan, pengadaan barang/jasa, atau pembangunan.\n\n"
             "Berikan respons JSON HANYA untuk kolom-kolom yang masih kosong tersebut:\n"
-            "{\n" + ",\n".join([f'  "{k}": "..."' for k in missing_keys]) + "\n}\n"
+            "{\n" + ",\n".join([f'  "{k}": "..."' for k in missing_core]) + "\n}\n"
             "Teks Dokumen:\n" + teks_mentah
         )
         try:
@@ -486,59 +535,13 @@ def rapikan_teks(teks_mentah):
                 max_tokens=2000
             )
             retry_parsed = parse_robust_json(chat_retry.choices[0].message.content, {})
-            for k in missing_keys:
+            for k in missing_core:
                 if retry_parsed.get(k) and retry_parsed[k] != "-":
                     result_data[k] = retry_parsed[k]
         except Exception as err:
-            print(f"ERROR ON AUTO-RETRY {attempt}:", err)
-            
-    # POST-PROCESSING: Normalisasi tanggal dan durasi deterministik
-    # 1. Jika tgl_awal atau tgl_akhir kosong/'-', cari dari masa_berlaku atau teks mentah
-    if not result_data.get("tgl_awal") or result_data["tgl_awal"] == "-" or not result_data.get("tgl_akhir") or result_data["tgl_akhir"] == "-":
-        dates_in_masa = parse_dates_from_text(result_data.get("masa_berlaku", ""))
-        if len(dates_in_masa) >= 2:
-            if not result_data.get("tgl_awal") or result_data["tgl_awal"] == "-":
-                result_data["tgl_awal"] = dates_in_masa[0]
-            if not result_data.get("tgl_akhir") or result_data["tgl_akhir"] == "-":
-                result_data["tgl_akhir"] = dates_in_masa[1]
-        else:
-            all_dates = parse_dates_from_text(teks_mentah)
-            if len(all_dates) >= 2:
-                if not result_data.get("tgl_awal") or result_data["tgl_awal"] == "-":
-                    result_data["tgl_awal"] = all_dates[0]
-                if not result_data.get("tgl_akhir") or result_data["tgl_akhir"] == "-":
-                    result_data["tgl_akhir"] = all_dates[1]
+            print("ERROR ON TARGETED RETRY:", err)
 
-    # 2. Jika tgl_terbit kosong/'-', cari tanggal SPPBJ / Surat / atau gunakan tgl_awal
-    if not result_data.get("tgl_terbit") or result_data["tgl_terbit"] == "-":
-        sppbj_match = re.search(r'(?:SPPBJ|Surat|Tanggal|Tgl)[^\n\r]*?(\d{1,2}\s+(?:Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Nopember|Desember)\s+\d{4})', teks_mentah, re.IGNORECASE)
-        if sppbj_match:
-            parsed = parse_dates_from_text(sppbj_match.group(1))
-            if parsed:
-                result_data["tgl_terbit"] = parsed[0]
-        elif result_data.get("tgl_awal") and result_data["tgl_awal"] != "-":
-            result_data["tgl_terbit"] = result_data["tgl_awal"]
-
-    # 3. Jika durasi_hk kosong/'-', cari angka hari
-    if not result_data.get("durasi_hk") or result_data["durasi_hk"] == "-":
-        dur_match = re.search(r'(\d+)\s*(?:HK|Hari|hari kalender|hari kerja)', result_data.get("masa_berlaku", "") + " " + teks_mentah, re.IGNORECASE)
-        if dur_match:
-            result_data["durasi_hk"] = dur_match.group(1)
-
-    # 4. Jika nomor_jaminan kosong/'-', cari nomor SPPBJ / Surat / Jaminan / Permohonan
-    if not result_data.get("nomor_jaminan") or result_data["nomor_jaminan"] == "-":
-        no_patterns = [
-            r'(?:SPPBJ|Polis|Jaminan|Sertifikat|Kontrak|Permohonan)\s*(?:No\.?|Nomor)\s*[:\.]?\s*([A-Za-z0-9\.\/\-]{6,})',
-            r'(?:No\.?|Nomor)\s*(?:SPPBJ|Polis|Jaminan|Sertifikat|Kontrak|Permohonan)\s*[:\.]?\s*([A-Za-z0-9\.\/\-]{6,})',
-            r'SPPBJ\s*No\.?\s*[:\.]?\s*([A-Za-z0-9\.\/\-]{6,})'
-        ]
-        for pat in no_patterns:
-            m = re.search(pat, teks_mentah, re.IGNORECASE)
-            if m:
-                val = m.group(1).strip().strip('.')
-                if not re.match(r'^\d{1,2}/\d{1,2}/\d{4}$', val):
-                    result_data["nomor_jaminan"] = val
-                    break
+        result_data = apply_deterministic_postprocessing(result_data, teks_mentah)
 
     if result_data.get("teks_asli"):
         result_data["teks_asli"] = clean_repetition_loops(result_data["teks_asli"])
