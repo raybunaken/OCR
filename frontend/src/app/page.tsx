@@ -25,6 +25,7 @@ export default function Home() {
   const [extractedData, setExtractedData] = useState<any>(null);
   const [batchFiles, setBatchFiles] = useState<BatchFileItem[]>([]);
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  const [batchWarmupStatus, setBatchWarmupStatus] = useState<string | null>(null);
   const stopBatchRef = useRef(false);
   const [documents, setDocuments] = useState<any[]>([]);
   const [isLoadingDocs, setIsLoadingDocs] = useState(false);
@@ -394,26 +395,36 @@ export default function Home() {
   // Helper pra-pemanasan (pre-warm) server backend agar dokumen pertama tidak terkena cold-start drop
   const ensureBackendReady = async (): Promise<boolean> => {
     try {
-      const ping = await fetchWithTimeout(`${API_URL}/health`, { method: "GET" }, 5000);
-      if (ping.ok) return true;
+      const ping = await fetchWithTimeout(`${API_URL}/health`, { method: "GET" }, 4000);
+      if (ping.ok) {
+        setBatchWarmupStatus(null);
+        return true;
+      }
     } catch (e) {
       // Backend might be sleeping
     }
+    setBatchWarmupStatus("Menghubungkan ke server backend (membangunkan sistem)...");
     toast.info("Menghubungkan ke server backend (membangunkan server)... Harap tunggu sebentar.");
     const maxTries = 8;
     for (let i = 1; i <= maxTries; i++) {
-      if (stopBatchRef.current) return false;
+      if (stopBatchRef.current) {
+        setBatchWarmupStatus(null);
+        return false;
+      }
+      setBatchWarmupStatus(`Membangunkan server backend (percobaan ${i}/${maxTries})...`);
       try {
         const ping = await fetchWithTimeout(`${API_URL}/health`, { method: "GET" }, 12000);
         if (ping.ok) {
+          setBatchWarmupStatus(null);
           toast.success("Server backend siap! Memulai pemrosesan dokumen...");
           return true;
         }
       } catch (err) {
         // server is still booting
       }
-      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, 2500));
     }
+    setBatchWarmupStatus(null);
     return false;
   };
 
@@ -498,6 +509,7 @@ export default function Home() {
 
     // Pastikan server backend bangun sebelum antrian dokumen pertama dikirim
     const isReady = await ensureBackendReady();
+    setBatchWarmupStatus(null);
     if (!isReady && !stopBatchRef.current) {
       toast.error("Server backend belum dapat dihubungi. Periksa koneksi server lalu coba lagi.");
       setIsBatchProcessing(false);
@@ -656,6 +668,7 @@ export default function Home() {
   const handleStopBatch = () => {
     stopBatchRef.current = true;
     setIsBatchProcessing(false);
+    setBatchWarmupStatus(null);
   };
 
   const handleRetryBatchItem = async (id: string) => {
@@ -2804,6 +2817,12 @@ export default function Home() {
                             {batchFiles.filter(f => f.status === "error").length} Gagal
                           </span>
                         )}
+                        {batchWarmupStatus && (
+                          <span className="text-amber-400 font-semibold bg-amber-950/60 border border-amber-800/40 px-2.5 py-0.5 rounded-full text-[11px] flex items-center gap-1.5 animate-pulse">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                            <span>Menyiapkan Server</span>
+                          </span>
+                        )}
                         {batchFiles.some(f => f.status !== "done") && (
                           <span className="text-sky-400 font-semibold bg-sky-950/60 border border-sky-800/40 px-2.5 py-0.5 rounded-full text-[11px] flex items-center gap-1">
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -2867,6 +2886,21 @@ export default function Home() {
 
                     return (
                       <div className="space-y-3">
+                        {batchWarmupStatus && (
+                          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start sm:items-center gap-3 animate-pulse shadow-sm">
+                            <svg className="w-4 h-4 animate-spin shrink-0 text-amber-400 mt-0.5 sm:mt-0" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <div className="flex-1">
+                              <div className="font-bold text-amber-200">{batchWarmupStatus}</div>
+                              <div className="text-[11px] text-amber-300/80 mt-0.5">
+                                Server sedang mengaktifkan mesin OCR. Antrian file akan berjalan otomatis begitu server siap, mohon jangan tutup browser.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         {allDone ? (
                           <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-teal-950/80 border border-emerald-500/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg shadow-emerald-950/50 animate-in fade-in">
                             <div className="flex items-center gap-3">
@@ -2927,6 +2961,11 @@ export default function Home() {
                                   <span className="text-sky-400 flex items-center gap-1.5">
                                     <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping"></span>
                                     Memproses: {activeItem.file.name}
+                                  </span>
+                                ) : isBatchProcessing && batchWarmupStatus ? (
+                                  <span className="text-amber-400 flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                                    Membangunkan Server Backend...
                                   </span>
                                 ) : (
                                   <span>Progress Antrian</span>
